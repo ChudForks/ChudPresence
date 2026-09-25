@@ -1241,20 +1241,11 @@ export class ActivityManager {
   async injectMatchingTab(tabId, rawUrl) {
     if (!Number.isInteger(tabId) || typeof rawUrl !== 'string' ||
         typeof this.api.userScripts?.execute !== 'function') return 0;
-    let currentUrl = rawUrl;
-    if (typeof this.api.tabs?.get === 'function') {
-      try {
-        const tab = await this.api.tabs.get(tabId);
-        if (tab?.discarded === true || typeof tab?.url === 'string' && tab.url) currentUrl = tab.url || '';
-      } catch {
-        return 0;
-      }
-    }
     const records = await this.load();
     let injected = 0;
     for (const record of Object.values(records)) {
       const patterns = Array.isArray(record?.metadata?.matches) ? record.metadata.matches : [];
-      if (!record?.enabled || !patterns.some((pattern) => safeMatch(pattern, currentUrl))) continue;
+      if (!record?.enabled || !patterns.some((pattern) => safeMatch(pattern, rawUrl))) continue;
       if (await this.injectActivityTab(record, { id: tabId })) injected += 1;
     }
     return injected;
