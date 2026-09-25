@@ -444,7 +444,27 @@ async function installRepositoryActivity(entry) {
       ...(entry.network || []),
     ])) return;
     setHeaderStatus(`Downloading ${entry.name}…`);
-    const activityPackage = await downloadActivity(entry.id, catalog);
+    let activityPackage;
+    try {
+      activityPackage = await downloadActivity(entry.id, catalog);
+    } catch (error) {
+      if (error.code !== 'catalog_metadata_mismatch') throw error;
+      const previousOrigins = [...entry.matches, ...(entry.network || [])].sort();
+      const refreshed = await fetchCatalog({ force: true });
+      catalog = refreshed.catalog;
+      describeCatalog(false, refreshed.fetchedAt);
+      renderCategories();
+      renderAll();
+      const updatedEntry = catalog.activities.find((item) => item.id === entry.id);
+      if (!updatedEntry) throw new Error(`${entry.name} is no longer in the catalog.`);
+      const updatedOrigins = [...updatedEntry.matches, ...(updatedEntry.network || [])].sort();
+      if (JSON.stringify(previousOrigins) !== JSON.stringify(updatedOrigins)) {
+        throw new Error('The Activity permissions changed. Review the updated catalog entry and install again.');
+      }
+      const updatedCompatibility = compatibilityMessage(updatedEntry);
+      if (updatedCompatibility) throw new Error(updatedCompatibility);
+      activityPackage = await downloadActivity(entry.id, catalog);
+    }
     const result = await extensionMessage({
       type: 'ACTIVITY_INSTALL',
       activityPackage: { ...activityPackage, sourceType: 'repository' },

@@ -229,6 +229,20 @@ export function validateActivityMetadata(metadata) {
        (metadata.presence.kind !== undefined && !PRESENCE_KINDS.has(metadata.presence.kind)))) {
     fail('Activity presence may contain only a supported kind.');
   }
+  if (metadata.settingsUi !== undefined) {
+    const ui = metadata.settingsUi;
+    if (!isPlainObject(ui) || Object.keys(ui).some((key) => key !== 'statusLabels')) {
+      fail('Activity settingsUi may contain only statusLabels.');
+    }
+    if (ui.statusLabels !== undefined) {
+      const labels = ui.statusLabels;
+      if (!isPlainObject(labels) || Object.entries(labels).some(([key, value]) =>
+        !['app', 'artist', 'track'].includes(key) || typeof value !== 'string' ||
+        !value.trim() || value.length > 80)) {
+        fail('Activity settingsUi.statusLabels must contain only app, artist, and track labels up to 80 characters.');
+      }
+    }
+  }
   if (metadata.executionWorld !== undefined && metadata.executionWorld !== 'USER_SCRIPT') {
     fail('Only the isolated USER_SCRIPT execution world is currently supported.');
   }

@@ -252,14 +252,14 @@ test('a newer bundled YouTube Activity updates an installed copy without enablin
     const filename = url.slice('test-extension://'.length);
     return new Response(await readFile(new URL(`../extension/${filename}`, import.meta.url)));
   });
-  assert.equal(bundled.metadata.version, '1.0.1');
-  await manager.install({ ...bundled, metadata: { ...bundled.metadata, version: '1.0.0' } });
+  assert.equal(bundled.metadata.version, '1.0.2');
+  await manager.install({ ...bundled, metadata: { ...bundled.metadata, version: '1.0.1' } });
   await manager.setEnabled('youtube', false);
   fake.data[DEFAULT_YOUTUBE_DECISION_KEY] = 'installed';
 
   assert.equal(await ensureBundledYouTubeInstalled({ manager, storage: fake.api.storage.local,
     api: fake.api, loadPackage: async () => bundled }), 'installed');
-  assert.equal((await manager.get('youtube')).metadata.version, '1.0.1');
+  assert.equal((await manager.get('youtube')).metadata.version, '1.0.2');
   assert.equal((await manager.get('youtube')).enabled, false);
   assert.equal(fake.scripts.has('chudpresence-activity-youtube'), false);
 });

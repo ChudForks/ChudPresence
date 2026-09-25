@@ -127,10 +127,11 @@ function renderInstalledActivitySettings(openActivityId = '') {
     const statusSelect = card.querySelector('[data-setting="status"]');
     statusSelect.closest('.compact-row')?.querySelector('strong')?.replaceChildren('Status display');
     statusSelect.replaceChildren();
-    for (const [value, label] of activityStatusOptions) {
+    const statusLabels = activity.settingsUi?.statusLabels;
+    for (const [value, fallbackLabel] of activityStatusOptions) {
       const option = document.createElement('option');
       option.value = value;
-      option.textContent = label;
+      option.textContent = statusLabels?.[value] || fallbackLabel;
       statusSelect.append(option);
     }
     statusSelect.value = activityStatusOptions.some(([value]) => value === preferences.statusDisplay)

@@ -77,6 +77,23 @@ test('validates declarative Activity settings for boolean, select, string, and n
   assert.throws(() => validateActivityMetadata(metadata({ settings: [{ ...settings[0], enabled: true }] })), /unsupported field/);
 });
 
+test('accepts optional status labels and rejects unsupported or empty UI metadata', () => {
+  const settingsUi = { statusLabels: { app: 'YouTube Music', artist: 'Artist', track: 'Song title' } };
+  assert.deepEqual(validateActivityMetadata(metadata({ settingsUi })).settingsUi, settingsUi);
+  assert.equal(validateActivityMetadata(metadata()).settingsUi, undefined);
+  for (const invalid of [
+    null,
+    { statusLabels: null },
+    { statusLabels: { creator: 'Creator' } },
+    { statusLabels: { track: '   ' } },
+    { statusLabels: { track: 'x'.repeat(81) } },
+    { statusLabels: { track: 42 } },
+    { other: true },
+  ]) {
+    assert.throws(() => validateActivityMetadata(metadata({ settingsUi: invalid })), /settingsUi/);
+  }
+});
+
 test('enforces Activity source size and non-empty content', () => {
   assert.equal(validateActivitySource('globalThis.started = true;'), 'globalThis.started = true;');
   assert.throws(() => validateActivitySource('  '), /non-empty JavaScript/);

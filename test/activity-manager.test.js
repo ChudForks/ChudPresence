@@ -33,6 +33,19 @@ const metadata = {
 };
 const capability = 'a'.repeat(64);
 
+test('exposes Activity status labels with installed metadata', async () => {
+  const settingsUi = { statusLabels: { artist: 'Creator', track: 'Video title' } };
+  const api = createApi({ stored: {
+    'sample-activity': {
+      metadata: { ...metadata, settingsUi }, code: 'void 0;', enabled: true,
+      preferences: { statusDisplay: 'artist' },
+    },
+  } });
+  const installed = await new ActivityManager({ api }).listInstalled();
+  assert.deepEqual(installed[0].settingsUi, settingsUi);
+  assert.equal(installed[0].preferences.statusDisplay, 'artist');
+});
+
 test('reports unavailable Chrome userScripts.execute as a settings issue during install', async () => {
   const manager = new ActivityManager({ api: createApi() });
   await assert.rejects(manager.install({ metadata, source: 'ChudPresence.report({ kind: "video", media: { title: "x" } });' }),

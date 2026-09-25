@@ -440,6 +440,35 @@ test('Activity preference, status, and enable changes use backend messages', asy
   assert.equal(popup.installed[0].preferences.statusDisplay, 'artist');
 });
 
+test('Activity status labels customize only option text and retain saved values', async () => {
+  const activity = {
+    id: 'youtube-music', name: 'YouTube Music', enabled: true,
+    settingsUi: { statusLabels: { app: 'YouTube Music', artist: 'Artist', track: 'Song title' } },
+    preferences: { statusDisplay: 'track' },
+  };
+  const fallback = { id: 'older-activity', name: 'Older Activity', enabled: true };
+  const popup = await createPopupHarness({ activities: [activity, fallback] });
+  const options = activityCard(popup, activity.id).querySelector('[data-setting="status"]');
+  assert.deepEqual(options.children.map((option) => [option.value, option.textContent]), [
+    ['app', 'YouTube Music'], ['artist', 'Artist'], ['track', 'Song title'],
+  ]);
+  assert.equal(options.value, 'track');
+  const fallbackOptions = activityCard(popup, fallback.id).querySelector('[data-setting="status"]');
+  assert.deepEqual(fallbackOptions.children.map((option) => option.textContent),
+    ['Activity name', 'Artist / creator', 'Media title']);
+  fallback.settingsUi = { statusLabels: { artist: 'Presenter' } };
+  popup.installed[1].settingsUi = fallback.settingsUi;
+  await popup.context.__popupTest.refreshInstalledActivities();
+  const partialOptions = activityCard(popup, fallback.id).querySelector('[data-setting="status"]');
+  assert.deepEqual(partialOptions.children.map((option) => option.textContent),
+    ['Activity name', 'Presenter', 'Media title']);
+  options.value = 'artist';
+  await popup.form.emitChange(options);
+  assert.deepEqual(popup.calls.filter((call) => call.type === 'ACTIVITY_SET_PREFERENCES').at(-1).preferences,
+    { statusDisplay: 'artist' });
+  assert.equal(activityCard(popup, activity.id).querySelector('[data-setting="status"]').value, 'artist');
+});
+
 test('active dynamic Activity uses its own name and package icon while Chromium diagnostics remain visible', async () => {
   const activity = {
     id: 'fresh-service-id', name: 'Fresh Service Name', enabled: true,

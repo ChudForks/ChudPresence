@@ -772,6 +772,7 @@ export class ActivityManager {
         matches: Array.isArray(record.metadata.matches) ? [...record.metadata.matches] : [],
         network: Array.isArray(record.metadata.network) ? [...record.metadata.network] : [],
         settings: Array.isArray(record.metadata.settings) ? structuredClone(record.metadata.settings) : [],
+        ...(record.metadata.settingsUi ? { settingsUi: structuredClone(record.metadata.settingsUi) } : {}),
         settingValues: normalizeActivitySettings(record.metadata.settings || [], record.settingValues),
         rawReport: diagnostics.rawReport || null,
         normalizedReport: diagnostics.normalizedReport || null,
