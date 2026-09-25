@@ -50,6 +50,16 @@ function extensionApi() {
   return globalThis.browser || globalThis.chrome;
 }
 
+function invokeActivityFetch(fetchImpl, url, init) {
+  // Chrome service workers reject a stored WorkerGlobalScope.fetch when it is
+  // called as a method: `this` becomes the caller and the binding throws
+  // "Failed to execute 'fetch' on 'WorkerGlobalScope': Illegal invocation".
+  // The native function has to be invoked as a property of the worker global.
+  // Injected implementations still receive that global as their receiver.
+  if (fetchImpl === globalThis.fetch) return globalThis.fetch(url, init);
+  return Reflect.apply(fetchImpl, globalThis, [url, init]);
+}
+
 function activityScriptId(id) {
   return `${SCRIPT_ID_PREFIX}${id}`;
 }
@@ -203,6 +213,8 @@ function scriptDefinition(record, extensionVersion = '0.0.0') {
     extensionVersion,
     capability: record.capability,
   }) + ');',
+    '  if (globalThis.__chudpresenceActivityGeneration === __activityIdentity.capability) return;',
+    '  globalThis.__chudpresenceActivityGeneration = __activityIdentity.capability;',
     '  const __request = (operation, payload = {}) => chrome.runtime.sendMessage({',
     '    type: "CHUDPRESENCE_ACTIVITY_REQUEST",',
     '    activityId: __activityIdentity.activityId,',
@@ -234,6 +246,7 @@ function scriptDefinition(record, extensionVersion = '0.0.0') {
     '    window.removeEventListener("pagehide", __onDocumentEnd);',
     '    window.removeEventListener("beforeunload", __onDocumentEnd);',
     '    try { __runtimePort?.disconnect?.(); } catch {}',
+    '    try { delete globalThis.__chudpresenceActivityGeneration; } catch {}',
     '    return true;',
     '  };',
     '  const __onDocumentEnd = () => __endLifecycle("document-destroyed");',
@@ -1160,6 +1173,8 @@ export class ActivityManager {
         ...(Array.isArray(previous.metadata?.matches) ? previous.metadata.matches : []),
         ...(Array.isArray(previous.metadata?.network) ? previous.metadata.network : []),
       ], records);
+    } else {
+      await this.injectMatchingTabs(record);
     }
     return { id: metadata.id, name: metadata.name, version: metadata.version };
   }
@@ -1174,6 +1189,46 @@ export class ActivityManager {
 
   remove(id) {
     return this.serialize(() => this.removeInternal(id));
+  }
+
+  async matchingOpenTabs(record) {
+    if (typeof this.api.tabs?.query !== 'function') return [];
+    const patterns = Array.isArray(record?.metadata?.matches) ? record.metadata.matches : [];
+    if (!patterns.length) return [];
+    try {
+      const tabs = await this.api.tabs.query({ url: patterns });
+      return (Array.isArray(tabs) ? tabs : []).filter((tab) =>
+        Number.isInteger(tab?.id) && tab.discarded !== true && patterns.some((pattern) => safeMatch(pattern, tab.url || '')),
+      );
+    } catch {
+      return [];
+    }
+  }
+
+  async injectMatchingTabs(record) {
+    if (!record?.enabled && record?.enabled !== undefined) return 0;
+    if (typeof this.api.userScripts?.execute !== 'function') return 0;
+    const tabs = await this.matchingOpenTabs(record);
+    let injected = 0;
+    for (const tab of tabs) {
+      try {
+        const results = await this.api.userScripts.execute({
+          js: scriptDefinition(record, extensionVersion(this.api)).js,
+          target: {
+            tabId: tab.id,
+            ...(record.metadata.frames === 'all' ? { allFrames: true } : {}),
+          },
+          world: 'USER_SCRIPT',
+          worldId: activityWorldId(record.metadata.id),
+          injectImmediately: true,
+        });
+        const result = Array.isArray(results) ? results[0] : null;
+        if (!result?.error) injected += 1;
+      } catch {
+        // A closing tab should not fail installation or restore.
+      }
+    }
+    return injected;
   }
 
   reload(id) {
@@ -1197,6 +1252,13 @@ export class ActivityManager {
     await this.register(record);
     let reloadedFrames = 0;
     for (const context of currentContexts) {
+      await this.api.userScripts.execute({
+        js: [{ code: 'try { delete globalThis.__chudpresenceActivityGeneration; } catch {}' }],
+        target: { tabId: context.tabId, documentIds: [context.documentId] },
+        world: 'USER_SCRIPT',
+        worldId: activityWorldId(id),
+        injectImmediately: true,
+      }).catch(() => {});
       const results = await this.api.userScripts.execute({
         js: scriptDefinition(record, extensionVersion(this.api)).js,
         target: { tabId: context.tabId, documentIds: [context.documentId] },
@@ -1214,6 +1276,7 @@ export class ActivityManager {
       }
       reloadedFrames += 1;
     }
+    await this.injectMatchingTabs(record);
     return { id, reloadedFrames };
   }
 
@@ -1307,6 +1370,8 @@ export class ActivityManager {
     if (enabled) {
       await this.register(record);
       record.permissionMissing = false;
+      record.enabled = true;
+      await this.injectMatchingTabs(record);
     } else {
       await this.notifyActivityTeardown(id, 'disabled');
       await this.unregister(id);
@@ -1418,6 +1483,7 @@ export class ActivityManager {
         else await this.api.userScripts.register([definition]);
         delete record.error;
         restored += 1;
+        await this.injectMatchingTabs(record);
       } catch (error) {
         record.permissionMissing = /permission|denied|not allowed/i.test(error.message || '');
         record.error = String(error.message || 'Activity restore failed').slice(0, 240);
@@ -1631,7 +1697,7 @@ export class ActivityManager {
         timeoutReject(error);
       }, timeoutMs);
       const requestPromise = (async () => {
-        const response = await this.fetchImpl(url.href, {
+        const response = await invokeActivityFetch(this.fetchImpl, url.href, {
           method: normalizedMethod,
           headers,
           ...(body === undefined ? {} : { body }),

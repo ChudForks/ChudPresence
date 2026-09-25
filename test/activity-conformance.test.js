@@ -1050,6 +1050,75 @@ test('brokers allowlisted cross-origin requests without credentials and records 
   assert.equal(diagnostic.status, 201);
 });
 
+test('invokes the Activity network fetch implementation with the global receiver', async () => {
+  const fake = createFakeApi();
+  fake.permissions.add('https://api.example.net/*');
+  let capturedReceiver;
+  const fetchImpl = function () {
+    capturedReceiver = this;
+    if (this !== globalThis) throw new TypeError('Illegal invocation');
+    return Promise.resolve(new Response('{"ok":true}', {
+      headers: { 'content-type': 'application/json' },
+    }));
+  };
+  const manager = new ActivityManager({ api: fake.api, fetchImpl });
+  const activity = activityPackage();
+  activity.metadata.network = ['https://api.example.net/*'];
+  await manager.install(activity);
+  const sender = {
+    userScriptWorldId: 'chudpresence.activity.sample-activity',
+    tab: { id: 29 }, frameId: 0, documentId: 'network-document', url: 'https://example.com/watch/1',
+  };
+
+  assert.deepEqual(await manager.handleUserScriptMessage(activityRequest(manager, 'net.fetch', {
+    url: 'https://api.example.net/data',
+    options: {},
+  }, 'receiver-check'), sender), {
+    ok: true,
+    requestId: 'receiver-check',
+    data: {
+      status: 200,
+      ok: true,
+      contentType: 'application/json',
+      data: { ok: true },
+    },
+  });
+  assert.equal(capturedReceiver, globalThis);
+});
+
+test('invokes native Activity fetch as a property of the worker global', async () => {
+  const fake = createFakeApi();
+  fake.permissions.add('https://api.example.net/*');
+  const originalFetch = globalThis.fetch;
+  let propertyCall = false;
+  globalThis.fetch = function fetch() {
+    propertyCall = this === globalThis;
+    if (this !== globalThis) {
+      throw new TypeError("Failed to execute 'fetch' on 'WorkerGlobalScope': Illegal invocation");
+    }
+    return Promise.resolve(new Response('{"ok":true}', {
+      headers: { 'content-type': 'application/json' },
+    }));
+  };
+  try {
+    const manager = new ActivityManager({ api: fake.api });
+    const activity = activityPackage();
+    activity.metadata.network = ['https://api.example.net/*'];
+    await manager.install(activity);
+    const sender = {
+      userScriptWorldId: 'chudpresence.activity.sample-activity',
+      tab: { id: 30 }, frameId: 0, documentId: 'network-document', url: 'https://example.com/watch/1',
+    };
+    assert.equal((await manager.handleUserScriptMessage(activityRequest(manager, 'net.fetch', {
+      url: 'https://api.example.net/data',
+      options: {},
+    }, 'native-receiver'), sender)).ok, true);
+    assert.equal(propertyCall, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('restricts network URLs, response size, and timeout', async () => {
   const fake = createFakeApi();
   fake.permissions.add('https://api.example.net/*');
@@ -1460,6 +1529,26 @@ test('records report lifecycle diagnostics and bounds Activity logs', async () =
   assert.equal(oversizedLog.error.code, 'log_entry_too_large');
   const state = await manager.status();
   assert.deepEqual(state.grantedOrigins, ['https://example.com/*']);
+});
+
+test('installs an Activity into an already open matching tab', async () => {
+  const fake = createFakeApi();
+  fake.api.tabs.query = async ({ url }) => {
+    assert.deepEqual(url, ['https://example.com/*']);
+    return [
+      { id: 77, url: 'https://example.com/watch/1' },
+      { id: 78, url: 'https://other.example/watch/1', discarded: true },
+    ];
+  };
+  const manager = new ActivityManager({ api: fake.api });
+
+  await manager.install(activityPackage());
+
+  const injection = fake.pageExecutions.find((item) => item.target?.tabId === 77);
+  assert.equal(injection.world, 'USER_SCRIPT');
+  assert.equal(injection.worldId, 'chudpresence.activity.sample-activity');
+  assert.equal(injection.injectImmediately, true);
+  assert.equal(fake.pageExecutions.some((item) => item.target?.tabId === 78), false);
 });
 
 test('reloads an installed Activity in its active Chrome document without restarting the service worker', async () => {
