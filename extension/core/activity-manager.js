@@ -1211,22 +1211,51 @@ export class ActivityManager {
     const tabs = await this.matchingOpenTabs(record);
     let injected = 0;
     for (const tab of tabs) {
+      if (await this.injectActivityTab(record, tab)) injected += 1;
+    }
+    return injected;
+  }
+
+  async injectActivityTab(record, tab) {
+    if (!record?.enabled && record?.enabled !== undefined) return false;
+    if (!Number.isInteger(tab?.id) || typeof this.api.userScripts?.execute !== 'function') return false;
+    try {
+      const results = await this.api.userScripts.execute({
+        js: scriptDefinition(record, extensionVersion(this.api)).js,
+        target: {
+          tabId: tab.id,
+          ...(record.metadata.frames === 'all' ? { allFrames: true } : {}),
+        },
+        world: 'USER_SCRIPT',
+        worldId: activityWorldId(record.metadata.id),
+        injectImmediately: true,
+      });
+      const result = Array.isArray(results) ? results[0] : null;
+      return !result?.error;
+    } catch {
+      // A closing or navigating tab should not fail installation or restore.
+      return false;
+    }
+  }
+
+  async injectMatchingTab(tabId, rawUrl) {
+    if (!Number.isInteger(tabId) || typeof rawUrl !== 'string' ||
+        typeof this.api.userScripts?.execute !== 'function') return 0;
+    let currentUrl = rawUrl;
+    if (typeof this.api.tabs?.get === 'function') {
       try {
-        const results = await this.api.userScripts.execute({
-          js: scriptDefinition(record, extensionVersion(this.api)).js,
-          target: {
-            tabId: tab.id,
-            ...(record.metadata.frames === 'all' ? { allFrames: true } : {}),
-          },
-          world: 'USER_SCRIPT',
-          worldId: activityWorldId(record.metadata.id),
-          injectImmediately: true,
-        });
-        const result = Array.isArray(results) ? results[0] : null;
-        if (!result?.error) injected += 1;
+        const tab = await this.api.tabs.get(tabId);
+        if (tab?.discarded === true || typeof tab?.url === 'string' && tab.url) currentUrl = tab.url || '';
       } catch {
-        // A closing tab should not fail installation or restore.
+        return 0;
       }
+    }
+    const records = await this.load();
+    let injected = 0;
+    for (const record of Object.values(records)) {
+      const patterns = Array.isArray(record?.metadata?.matches) ? record.metadata.matches : [];
+      if (!record?.enabled || !patterns.some((pattern) => safeMatch(pattern, currentUrl))) continue;
+      if (await this.injectActivityTab(record, { id: tabId })) injected += 1;
     }
     return injected;
   }

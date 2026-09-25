@@ -1551,6 +1551,19 @@ test('installs an Activity into an already open matching tab', async () => {
   assert.equal(fake.pageExecutions.some((item) => item.target?.tabId === 78), false);
 });
 
+test('injects an enabled Activity when a same-document URL enters its match pattern', async () => {
+  const fake = createFakeApi();
+  const manager = new ActivityManager({ api: fake.api });
+  await manager.install(activityPackage());
+
+  assert.equal(await manager.injectMatchingTab(79, 'https://example.com/watch/1'), 1);
+  const injection = fake.pageExecutions.find((item) => item.target?.tabId === 79);
+  assert.equal(injection.world, 'USER_SCRIPT');
+  assert.equal(injection.worldId, 'chudpresence.activity.sample-activity');
+  assert.equal(injection.injectImmediately, true);
+  assert.equal(await manager.injectMatchingTab(79, 'https://other.example/watch/1'), 0);
+});
+
 test('reloads an installed Activity in its active Chrome document without restarting the service worker', async () => {
   const fake = createFakeApi();
   const cleared = [];

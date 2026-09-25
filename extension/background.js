@@ -400,6 +400,11 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   // A History API URL update keeps the current document and user-script world.
   // Retiring it here makes its next report fail with stale_document.
   if (shouldInvalidateActivityTab(changeInfo)) onTabGone(tabId);
+  if (changeInfo?.url && changeInfo.status !== 'loading') {
+    // A same-document SPA route can enter an Activity's match pattern without
+    // giving Chrome a new document in which to run the registered user script.
+    activityManager.injectMatchingTab(tabId, changeInfo.url).catch(() => {});
+  }
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
