@@ -830,7 +830,7 @@ export class ActivityManager {
         frameContexts: frameContexts.map((context) => ({
           frameId: context.frameId,
           parentFrameId: context.parentFrameId,
-          state: context.active === false ? 'retired' : 'active',
+          state: context.active === false ? (context.documentId ? 'loading' : 'retired') : 'active',
           documentId: context.documentId || context.lastDocumentId || null,
           senderUrl: context.senderUrl,
           retiredDocumentIds: [...(context.retiredDocumentIds || [])],
@@ -2141,7 +2141,7 @@ export class ActivityManager {
     }
     const replacedTopDocument = frameId === 0 && prior?.documentId && prior.documentId !== sender.documentId;
     const staleChildren = replacedTopDocument
-      ? [...frames.entries()].filter(([childFrameId, context]) => childFrameId !== 0 && context.active !== false && context.documentId)
+      ? [...frames.entries()].filter(([childFrameId, context]) => childFrameId !== 0 && context.documentId)
       : [];
     for (const [childFrameId, childContext] of staleChildren) {
       const childRetiredDocumentIds = new Set(childContext.retiredDocumentIds || []);
@@ -2299,7 +2299,7 @@ export class ActivityManager {
     });
   }
 
-  async invalidateTab(tabId) {
+  async invalidateTab(tabId, { retireDocuments = true } = {}) {
     if (!Number.isInteger(tabId)) return 0;
     const callbacks = [];
     let invalidated = 0;
@@ -2307,15 +2307,17 @@ export class ActivityManager {
       const frames = tabs.get(tabId);
       if (!frames) continue;
       for (const [frameId, context] of frames) {
-        if (context.active === false) continue;
+        if (context.active === false && (!retireDocuments || !context.documentId)) continue;
         const retiredDocumentIds = new Set(context.retiredDocumentIds || []);
-        if (context.documentId) retiredDocumentIds.add(context.documentId);
+        if (retireDocuments && context.documentId) retiredDocumentIds.add(context.documentId);
         while (retiredDocumentIds.size > MAX_RETIRED_DOCUMENTS_PER_FRAME) {
           retiredDocumentIds.delete(retiredDocumentIds.values().next().value);
         }
         frames.set(frameId, {
           ...context,
-          documentId: null,
+          // A loading update is not proof of replacement. Retain the ID so a
+          // same-document report resumes immediately and a new ID retires it.
+          documentId: retireDocuments ? null : context.documentId,
           lastDocumentId: context.documentId,
           active: false,
           lastSeen: Date.now(),

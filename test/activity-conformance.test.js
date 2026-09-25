@@ -10,7 +10,7 @@ import {
   loadBundledYouTubePackage,
   rememberBundledYouTubeRemoval,
 } from '../extension/core/default-activity.js';
-import { shouldInvalidateActivityTab } from '../extension/core/tab-lifecycle.js';
+import { shouldInvalidateActivityTab, shouldRetireActivityTab } from '../extension/core/tab-lifecycle.js';
 
 function createFakeEvent() {
   const listeners = new Set();
@@ -1828,6 +1828,51 @@ test('a queue-style YouTube Music URL update keeps the same document eligible to
     report: activityReport('Old document'),
   }), nextSender)).error.code, 'stale_document');
   assert.equal(shouldInvalidateActivityTab({ discarded: true }), true);
+});
+
+test('Hulu-style loading updates accept the same document immediately and still retire replaced frames', async () => {
+  const fake = createFakeApi();
+  const reports = [];
+  const clears = [];
+  const manager = new ActivityManager({ api: fake.api,
+    onReport: (report) => reports.push(report), onClear: (...args) => clears.push(args) });
+  const activity = activityPackage();
+  activity.metadata.frames = 'all';
+  await manager.install(activity);
+  const top = {
+    userScriptWorldId: 'chudpresence.activity.sample-activity',
+    tab: { id: 25 }, frameId: 0, documentId: 'hulu-document',
+    url: 'https://example.com/watch/first',
+  };
+  const child = { ...top, frameId: 2, documentId: 'player-document' };
+  const report = (sender, title) => manager.handleUserScriptMessage(activityRequest(manager,
+    'presence.report', { report: activityReport(title) }), sender);
+  await report(top, 'First episode');
+  await report(child, 'Player');
+
+  for (const update of [{ status: 'loading', url: 'https://example.com/watch/next' }, { status: 'loading' }]) {
+    assert.equal(shouldInvalidateActivityTab(update), true);
+    assert.equal(shouldRetireActivityTab(update), false);
+    await manager.invalidateTab(25, { retireDocuments: shouldRetireActivityTab(update) });
+    assert.equal((await manager.listInstalled())[0].activeFrames.length, 0);
+    assert.equal((await report({ ...top, url: 'https://example.com/watch/next' }, 'Next episode')).ok, true);
+    assert.equal(reports.at(-1).track.media.title, 'Next episode');
+    assert.equal((await report(child, 'Same player')).ok, true);
+  }
+  assert.ok(clears.some((args) => args[2] === 'hulu-document'));
+
+  // A real replacement after loading must still reject the old top and child.
+  await manager.invalidateTab(25, { retireDocuments: false });
+  const replacement = { ...top, documentId: 'replacement-document' };
+  assert.equal((await report(replacement, 'New page')).ok, true);
+  assert.equal((await report(top, 'Late old episode')).error.code, 'stale_document');
+  assert.equal((await report(child, 'Late old player')).error.code, 'stale_document');
+
+  // Discard/close must retire even a context already suspended by loading.
+  await manager.invalidateTab(25, { retireDocuments: false });
+  assert.equal(shouldRetireActivityTab({ discarded: true }), true);
+  await manager.invalidateTab(25, { retireDocuments: shouldRetireActivityTab({ discarded: true }) });
+  assert.equal((await report(replacement, 'Discarded page')).error.code, 'stale_document');
 });
 
 test('disable and remove unregister the script and update installed state', async () => {

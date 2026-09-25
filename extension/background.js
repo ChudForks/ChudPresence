@@ -6,7 +6,7 @@ import {
   ensureBundledYouTubeInstalled,
   rememberBundledYouTubeRemoval,
 } from './core/default-activity.js';
-import { shouldInvalidateActivityTab } from './core/tab-lifecycle.js';
+import { shouldInvalidateActivityTab, shouldRetireActivityTab } from './core/tab-lifecycle.js';
 import { createPresenceIntent } from './core/presence.js';
 import {
   applicationIdForPresence,
@@ -162,9 +162,9 @@ function pingRemaining() {
   }
 }
 
-function onTabGone(tabId, { closing = false } = {}) {
+function onTabGone(tabId, { closing = false, retireDocuments = true } = {}) {
   if (typeof tabId !== 'number') return;
-  activityManager.invalidateTab(tabId).catch(() => {});
+  activityManager.invalidateTab(tabId, { retireDocuments }).catch(() => {});
   const known = activityRegistry.clearTab(tabId);
   clearActiveTab(tabId);
   if (!known) return;
@@ -397,9 +397,11 @@ chrome.runtime.onConnect.addListener((port) => {
 chrome.tabs.onRemoved.addListener((tabId) => onTabGone(tabId, { closing: true }));
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  // A History API URL update keeps the current document and user-script world.
-  // Retiring it here makes its next report fail with stale_document.
-  if (shouldInvalidateActivityTab(changeInfo)) onTabGone(tabId);
+  // Loading can accompany a same-document route change. Clear the presence,
+  // but let the next report's document ID establish whether it was replaced.
+  if (shouldInvalidateActivityTab(changeInfo)) {
+    onTabGone(tabId, { retireDocuments: shouldRetireActivityTab(changeInfo) });
+  }
   if (changeInfo?.url) {
     // A same-document SPA route can enter an Activity's match pattern without
     // giving Chrome a new document in which to run the registered user script.
