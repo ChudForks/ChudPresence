@@ -116,26 +116,52 @@ function actionButton(text, className, action, disabled = false) {
   return button;
 }
 
-function baseCard({ name, description, category, version, matches, icon = '', local = false }) {
+const bundledCardIcons = new Set(['67movies', 'crunchyroll', 'kick', 'twitch', 'youtube', 'youtube-music']);
+
+function cardIcon(id, icon) {
+  if (icon?.startsWith('data:image/png;base64,')) return icon;
+  return bundledCardIcons.has(id) ? `assets/activity-icons/${id}.png` : '';
+}
+
+function baseCard({ id, name, description, category, version, matches, icon = '', local = false }) {
   const card = element('article', 'activity-card');
+  if (bundledCardIcons.has(id)) card.classList.add(`activity-${id}`);
+  const art = element('div', 'card-art');
+  const artIcon = cardIcon(id, icon);
+  if (artIcon) {
+    const watermark = element('img', 'card-watermark');
+    watermark.src = artIcon;
+    watermark.alt = '';
+    watermark.addEventListener('error', () => watermark.remove());
+    art.append(watermark);
+  }
+  const mark = element('span', 'activity-logo');
+  if (artIcon) {
+    const image = element('img', 'activity-logo-image');
+    image.src = artIcon;
+    image.alt = '';
+    image.addEventListener('error', () => { image.remove(); mark.textContent = name?.charAt(0) || 'A'; });
+    mark.append(image);
+  } else {
+    mark.textContent = name?.charAt(0) || 'A';
+  }
+  const categoryLabel = (category || 'other').replaceAll('-', ' ');
+  const artBadge = element('span', 'badge category-badge', categoryLabel);
+  art.append(mark, artBadge);
   const top = element('div', 'card-top');
   const identity = element('div', 'card-identity');
-  if (icon) {
-    const image = element('img', 'activity-logo');
-    image.src = icon;
-    image.alt = '';
-    image.addEventListener('error', () => image.remove());
-    identity.append(image);
-  }
   const heading = element('h3', '', name);
   identity.append(heading);
-  const badge = element('span', `badge${local ? ' local' : ''}`, local ? 'Local' : category || 'other');
+  const badge = element('span', `badge status-badge${local ? ' local' : ''}`, local ? 'Local' : '');
+  if (!local) badge.hidden = true;
   top.append(identity, badge);
-  card.append(top, element('p', 'card-description', description || 'No description provided.'));
+  const content = element('div', 'card-content');
+  content.append(top, element('p', 'card-description', description || 'No description provided.'));
   const meta = element('div', 'card-meta');
   meta.append(element('span', '', formatVersion(version || '0.0.0')));
   meta.append(element('span', 'card-sites', hostSummary(matches)));
-  card.append(meta);
+  content.append(meta);
+  card.append(art, content);
   return { card, actions: element('div', 'card-actions') };
 }
 
@@ -163,8 +189,9 @@ function renderDiscover() {
     const record = installedMap.get(entry.id);
     const compatibility = compatibilityMessage(entry);
     if (compatibility) {
-      card.querySelector('.badge').textContent = compatibility;
-      card.querySelector('.badge').className = 'badge issue';
+      card.querySelector('.status-badge').textContent = compatibility;
+      card.querySelector('.status-badge').className = 'badge status-badge issue';
+      card.querySelector('.status-badge').hidden = false;
       card.querySelector('.card-description').textContent = `${entry.description} ${compatibility}.`;
       actions.append(actionButton('Unavailable', 'secondary', () => {}, true));
     } else if (!record) {
@@ -260,11 +287,12 @@ function renderInstalled() {
       'permission-missing': 'Permission missing',
       error: 'Error',
     }[record.status] || 'Waiting for site';
-    const badge = card.querySelector('.badge');
+    const badge = card.querySelector('.status-badge');
     badge.textContent = `${record.source?.type === 'local' ? 'Local · '
       : record.source?.type === 'bundled' ? 'Included · ' : ''}${statusText}`;
     badge.title = record.error || '';
-    badge.className = `badge${record.status === 'detected' ? ' active' : ['incompatible', 'permission-missing', 'error'].includes(record.status) ? ' issue' : record.source?.type === 'local' ? ' local' : ''}`;
+    badge.className = `badge status-badge${record.status === 'detected' ? ' active' : ['incompatible', 'permission-missing', 'error'].includes(record.status) ? ' issue' : record.source?.type === 'local' ? ' local' : ''}`;
+    badge.hidden = false;
     if (developerEnabled.checked) {
       const contexts = record.frameContexts || [];
       const requests = record.networkRequests || [];
@@ -359,7 +387,7 @@ function showView(view) {
 function describeCatalog(cached, fetchedAt) {
   if (fetchedAt) {
     const date = new Date(fetchedAt);
-    catalogAge.textContent = `${cached ? 'Cached' : 'Updated'} ${date.toLocaleString()}`;
+    catalogAge.textContent = `${cached ? 'Cached' : 'Updated'} · ${date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}`;
   } else {
     catalogAge.textContent = '';
   }
@@ -375,8 +403,8 @@ async function refreshInstalled() {
   userScriptsAvailable = state.userScriptsPermission === true;
   setHeaderStatus(
     nextPermissionStep || (state.userScriptsPermission
-      ? `${installed.length} installed · isolated runtime ready`
-      : 'Enable Allow User Scripts in extension settings'),
+      ? `${installed.length} installed · Ready`
+      : 'Allow User Scripts in Chrome settings'),
     state.userScriptsPermission ? 'on' : 'error',
   );
   renderAll();
@@ -612,7 +640,7 @@ async function initialize() {
   }, 3000);
   renderAll();
   if (catalog) {
-    setNotice(catalogNotice, 'Showing the cached catalog. Refresh to check for new Activities.', '');
+    setNotice(catalogNotice, '');
   } else {
     setNotice(catalogNotice, 'Connect to the ChudForks/ChudPresence-Activities catalog, or load an Activity locally in Developer.');
   }
