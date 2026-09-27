@@ -66,6 +66,12 @@ streams use title / creator. Playback defaults to playing at position zero and
 rate one. Visibility supports `normal`, `idle`, `private`, and `ad`; only
 `normal` reports are published.
 
+Optional `display.detailsUrl` and `display.stateUrl` make the corresponding
+presence text clickable. `artwork.largeUrl` makes the large image clickable
+when `artwork.large` is present. For a song, use the song URL as `detailsUrl`,
+the displayed artist URL as `stateUrl`, and the album URL as `largeUrl`.
+These links are independent of the two-button limit and must be HTTPS URLs.
+
 `ChudPresence.runtime` provides the registered `activityId`, package
 `activityVersion`, `apiVersion`, `extensionVersion`, a frame descriptor, and
 `has(feature)`. `lifecycle` provides an abort signal, cleanup callbacks, and

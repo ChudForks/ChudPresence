@@ -118,6 +118,31 @@ test('normalizes a bounded HTTPS Activity report', () => {
   });
 });
 
+test('normalizes clickable presence text and artwork URLs', () => {
+  const report = normalizeActivityReport({
+    kind: 'song',
+    media: { title: 'Track', artist: 'Artist', album: 'Album' },
+    display: {
+      detailsUrl: 'https://music.example.com/watch?v=1',
+      stateUrl: 'https://music.example.com/artist/1',
+    },
+    artwork: {
+      large: 'https://cdn.example.com/cover.png',
+      largeUrl: 'https://music.example.com/album/1',
+    },
+  });
+  assert.equal(report.display.detailsUrl, 'https://music.example.com/watch?v=1');
+  assert.equal(report.display.stateUrl, 'https://music.example.com/artist/1');
+  assert.equal(report.artwork.largeUrl, 'https://music.example.com/album/1');
+  for (const [section, field] of [
+    ['display', 'detailsUrl'], ['display', 'stateUrl'], ['artwork', 'largeUrl'],
+  ]) {
+    assert.throws(() => normalizeActivityReport({
+      kind: 'song', media: { title: 'Track' }, [section]: { [field]: 'javascript:alert(1)' },
+    }), /HTTPS URL/);
+  }
+});
+
 test('supplies kind-specific display defaults and normalized playback defaults', () => {
   assert.deepEqual(normalizeActivityReport({
     kind: 'episode',

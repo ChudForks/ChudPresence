@@ -361,6 +361,10 @@ function normalizeDisplay(value, kind, media) {
     const cleaned = cleanText(value[field], `display.${field}`) || '';
     display[field] = cleaned;
   }
+  for (const field of ['detailsUrl', 'stateUrl']) {
+    const url = cleanHttpsUrl(value[field], `display.${field}`);
+    if (url) display[field] = url;
+  }
   display.statusDisplay = value.statusDisplay === undefined ? 'details' : value.statusDisplay;
   if (typeof display.statusDisplay !== 'string' || !REPORT_STATUS_DISPLAY.has(display.statusDisplay)) {
     fail('display.statusDisplay must be name, details, or state.');
@@ -372,7 +376,7 @@ function normalizeArtwork(value) {
   if (value === undefined) value = {};
   normalizeReportTextObject(value, REPORT_ARTWORK_FIELDS, 'artwork');
   const artwork = {};
-  for (const field of ['large', 'small']) {
+  for (const field of ['large', 'largeUrl', 'small']) {
     const url = cleanHttpsUrl(value[field], `artwork.${field}`);
     if (url) artwork[field] = url;
   }

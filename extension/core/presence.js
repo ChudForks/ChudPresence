@@ -169,7 +169,10 @@ export function createPresenceIntent(track, nowMs = Date.now(), settings = {}) {
   const streamUrl = safeUrl(report.url) || safeUrl(report.buttons?.[0]?.url);
   const art = settings.showArtwork === false ? null : report.artwork;
   const largeImage = safeUrl(art?.large);
+  const largeUrl = safeUrl(art?.largeUrl);
   const smallImage = safeUrl(art?.small);
+  const detailsUrl = safeUrl(report.display.detailsUrl);
+  const stateUrl = safeUrl(report.display.stateUrl);
   const buttons = settings.showButtons === false
     ? []
     : (report.buttons || []).map((button) => {
@@ -183,12 +186,15 @@ export function createPresenceIntent(track, nowMs = Date.now(), settings = {}) {
     type,
     ...(type === 'streaming' && streamUrl ? { streamUrl } : {}),
     details,
+    ...(detailsUrl ? { detailsUrl } : {}),
     state: markers.length ? `${cleanText(state, MAX_TEXT_LENGTH - markers.join(' • ').length - 3)} • ${markers.join(' • ')}` : state,
+    ...(stateUrl ? { stateUrl } : {}),
     statusDisplayType: statusDisplayType(report, settings),
     timestamps: settings.showTimestamps === false ? null : timestamps(report.playback, nowMs),
     assets: largeImage ? {
       largeImage,
       largeText: cleanText(art.largeText || report.media.album || report.media.title),
+      ...(largeUrl ? { largeUrl } : {}),
       ...(smallImage ? { smallImage, smallText: cleanText(art.smallText || name) } : {}),
     } : null,
     buttons,

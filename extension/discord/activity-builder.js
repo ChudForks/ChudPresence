@@ -22,6 +22,9 @@ export function buildHeadlessActivity(intent, applicationId) {
     status_display_type: STATUS_DISPLAY_TYPES[intent.statusDisplayType] ?? STATUS_DISPLAY_TYPES.name,
   };
 
+  if (intent.detailsUrl) activity.details_url = intent.detailsUrl;
+  if (intent.stateUrl) activity.state_url = intent.stateUrl;
+
   if (intent.type === 'streaming' && intent.streamUrl) activity.url = intent.streamUrl;
 
   if (intent.timestamps?.start || intent.timestamps?.end) {
@@ -35,6 +38,7 @@ export function buildHeadlessActivity(intent, applicationId) {
       large_image: intent.assets.largeImage,
       large_text: intent.assets.largeText || intent.name || EXTENSION_NAME,
     };
+    if (intent.assets.largeUrl) activity.assets.large_url = intent.assets.largeUrl;
     if (intent.assets.smallImage) activity.assets.small_image = intent.assets.smallImage;
     if (intent.assets.smallText) activity.assets.small_text = intent.assets.smallText;
   }

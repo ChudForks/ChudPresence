@@ -61,6 +61,36 @@ test('formats normalized Activity reports independently of their registered Acti
   assert.deepEqual(first.buttons, [{ label: 'Watch', url: 'https://watch.example.com/episode/3' }]);
 });
 
+test('passes clickable song, artist, and album URLs through the presence intent', () => {
+  const intent = createPresenceIntent({
+    ...normalizeActivityReport({
+      kind: 'song',
+      media: { title: 'Track', artist: 'Artist', album: 'Album' },
+      display: {
+        detailsUrl: 'https://music.example.com/watch?v=1',
+        stateUrl: 'https://music.example.com/artist/1',
+      },
+      artwork: {
+        large: 'https://cdn.example.com/cover.png',
+        largeUrl: 'https://music.example.com/album/1',
+      },
+    }),
+    activityName: 'Music',
+  }, 1_000_000);
+  assert.equal(intent.detailsUrl, 'https://music.example.com/watch?v=1');
+  assert.equal(intent.stateUrl, 'https://music.example.com/artist/1');
+  assert.equal(intent.assets.largeUrl, 'https://music.example.com/album/1');
+
+  const hiddenArtwork = createPresenceIntent({
+    ...normalizeActivityReport({
+      kind: 'song', media: { title: 'Track' },
+      artwork: { largeUrl: 'https://music.example.com/album/1' },
+    }),
+    activityName: 'Music',
+  }, 1_000_000, { showArtwork: false });
+  assert.equal(hiddenArtwork.assets, null);
+});
+
 test('uses generic song, movie, and stream report semantics', () => {
   const song = createPresenceIntent({
     ...normalizeActivityReport({ kind: 'song', media: { title: 'Song', artist: 'Artist', album: 'Album' } }),
