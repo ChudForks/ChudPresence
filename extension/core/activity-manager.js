@@ -24,7 +24,9 @@ const SCRIPT_ID_PREFIX = 'chudpresence-activity-';
 const WORLD_ID_PREFIX = 'chudpresence.activity.';
 const MAX_REPORTS_PER_WINDOW = 30;
 const REPORT_WINDOW_MS = 10_000;
-const STATUS_TTL_MS = 30_000;
+// Background tabs can have script timers batched to roughly once a minute.
+// Leave room for that cadence before treating an otherwise live report as stale.
+const STATUS_TTL_MS = 90_000;
 const MAX_PAGE_EXECUTE_SOURCE_LENGTH = 16_384;
 const MAX_PAGE_EXECUTE_ARGUMENTS_LENGTH = 16_384;
 const MAX_PAGE_EXECUTE_RESULT_LENGTH = 65_536;

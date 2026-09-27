@@ -1682,6 +1682,41 @@ test('ignores a delayed clear from an older document in the same tab', async () 
   assert.deepEqual(cleared[1], ['sample-activity', 9, 'new-document', 0]);
 });
 
+test('keeps a background Activity detected between minute-spaced reports', async () => {
+  const fake = createFakeApi();
+  const cleared = [];
+  const manager = new ActivityManager({ api: fake.api, onClear: (...args) => cleared.push(args) });
+  await manager.install(activityPackage());
+  const sender = {
+    userScriptWorldId: 'chudpresence.activity.sample-activity',
+    tab: { id: 9 },
+    documentId: 'music-document',
+    url: 'https://example.com/watch',
+  };
+  const first = await manager.handleUserScriptMessage(activityRequest(manager, 'presence.report', {
+    report: activityReport('Background playback'),
+  }), sender);
+  assert.equal(first.data.accepted, true);
+
+  let frame = manager.lastSeen.get('sample-activity').get(9).get(0);
+  frame.lastSeen = Date.now() - 65_000;
+  assert.equal((await manager.listInstalled())[0].status, 'detected');
+  assert.equal(await manager.pruneStale(), 0);
+  assert.deepEqual(cleared, []);
+
+  const next = await manager.handleUserScriptMessage(activityRequest(manager, 'presence.report', {
+    report: activityReport('Background playback'),
+  }, 'next-minute-report'), sender);
+  assert.equal(next.data.accepted, true);
+  assert.equal((await manager.listInstalled())[0].status, 'detected');
+
+  frame = manager.lastSeen.get('sample-activity').get(9).get(0);
+  frame.lastSeen = Date.now() - 95_000;
+  assert.equal((await manager.listInstalled())[0].status, 'waiting');
+  assert.equal(await manager.pruneStale(), 1);
+  assert.deepEqual(cleared, [['sample-activity', 9, 'music-document', 0]]);
+});
+
 test('supports top and embedded player frames and rejects reports from replaced child documents', async () => {
   const fake = createFakeApi();
   fake.permissions.add('https://player.example.com/*');

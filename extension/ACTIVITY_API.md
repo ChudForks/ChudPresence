@@ -202,7 +202,9 @@ Activity identity comes from the registered user-script world, not from report
 data. Runtime calls use structured request/response messages internally; the
 extension checks the sending world, page URL, report shape, field sizes, and
 request rate. Each report remains tied to its tab, frame, document, and sender
-URL. The runtime ignores reports and clears from a document after it has
+URL. Keep sending reports while playback continues: a frame that has not
+reported for 90 seconds is dropped and its presence is cleared. The runtime
+ignores reports and clears from a document after it has
 observed a replacement document in that frame. Replacing the top document also
 retires reports from its child frames. A same-document History API URL change
 keeps that document eligible to report, including queued playback transitions.
