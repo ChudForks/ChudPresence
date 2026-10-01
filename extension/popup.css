@@ -97,7 +97,11 @@ body[data-enabled="false"] .status-dot { background: #6f7484; box-shadow: none; 
 .art-fallback { display: grid; place-items: center; color: #aab3ff; background: radial-gradient(circle at 30% 22%, rgba(107,132,255,.21), transparent 60%), #111524; }
 .art-fallback svg { width: 31px; height: 31px; }
 .art-fallback svg path { fill: currentColor; stroke: none; }
-.service-mark { position: absolute; right: -6px; bottom: -6px; display: grid; place-items: center; width: 27px; height: 27px; padding: 3px; border: 2px solid #161a2d; border-radius: 9px; background: #0d101d; box-shadow: 0 5px 14px rgba(0,0,0,.35); }
+.service-mark, .pause-mark { position: absolute; right: -6px; bottom: -6px; display: grid; place-items: center; width: 27px; height: 27px; border: 2px solid #161a2d; border-radius: 9px; background: #0d101d; box-shadow: 0 5px 14px rgba(0,0,0,.35); }
+.service-mark { padding: 3px; }
+.pause-mark { color: #f7f8fc; }
+.pause-mark svg { width: 14px; height: 14px; }
+.pause-mark svg rect { fill: currentColor; stroke: none; }
 .service-mark img { width: 100%; height: 100%; border-radius: 5px; }
 .presence-copy { min-width: 0; }
 .kicker { color: #aeb9ff; font-size: 9px; font-weight: 720; letter-spacing: .08em; text-transform: uppercase; }

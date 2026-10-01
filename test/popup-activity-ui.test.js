@@ -506,6 +506,46 @@ test('active dynamic Activity uses its own name and package icon while Chromium 
   assert.equal(tileIcon.src, 'icons/icon32.png');
 });
 
+test('YouTube Music shows a pause badge on album art only while paused', async () => {
+  const activity = {
+    id: 'youtube-music', name: 'YouTube Music', enabled: true, icon: 'icons/icon32.png',
+  };
+  const popup = await createPopupHarness({
+    activities: [activity],
+    state: {
+      track: {
+        activityId: activity.id,
+        activityName: activity.name,
+        media: { title: 'A Song', artist: 'An Artist' },
+        playback: { state: 'paused' },
+        artwork: { large: 'https://example.com/cover.png' },
+      },
+    },
+  });
+  assert.equal(popup.document.getElementById('pause-mark').hidden, false);
+  assert.equal(popup.document.getElementById('service-mark').hidden, true);
+  assert.equal(popup.document.getElementById('kicker').textContent, 'Paused · YouTube Music');
+
+  popup.dashboard.track.playback.state = 'playing';
+  await popup.context.__popupTest.refresh();
+  assert.equal(popup.document.getElementById('pause-mark').hidden, true);
+  assert.equal(popup.document.getElementById('service-mark').hidden, false);
+
+  const other = await createPopupHarness({
+    activities: [{ id: 'fresh-service-id', name: 'Fresh Service Name', enabled: true }],
+    state: {
+      track: {
+        activityId: 'fresh-service-id',
+        activityName: 'Fresh Service Name',
+        media: { title: 'A Video' },
+        playback: { state: 'paused' },
+      },
+    },
+  });
+  assert.equal(other.document.getElementById('pause-mark').hidden, true);
+  assert.equal(other.document.getElementById('service-mark').hidden, false);
+});
+
 test('rejected updates restore backend state and stale removed Activities disappear from the popup', async () => {
   const activity = {
     id: 'stale-while-popup-open', name: 'Stale Activity', enabled: true,

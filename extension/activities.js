@@ -1,4 +1,4 @@
-import { compareActivityVersions, downloadActivity, fetchCatalog, readCatalogCache } from './core/activity-repository.js';
+import { ACTIVITY_REPOSITORY, compareActivityVersions, downloadActivity, fetchCatalog, readCatalogCache } from './core/activity-repository.js';
 import { requestHostPermissions } from './core/activity-permissions.js';
 import {
   MAX_ACTIVITY_ICON_BYTES,
@@ -116,16 +116,20 @@ function actionButton(text, className, action, disabled = false) {
   return button;
 }
 
-const bundledCardIcons = new Set(['67movies', 'crunchyroll', 'kick', 'twitch', 'youtube', 'youtube-music']);
+function repositoryCardIcon(id, icon) {
+  if (typeof id !== 'string' || typeof icon !== 'string') return '';
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id) || icon !== `activities/${id}/icon.png`) return '';
+  return `${ACTIVITY_REPOSITORY.baseUrl}${icon}`;
+}
 
 function cardIcon(id, icon) {
   if (icon?.startsWith('data:image/png;base64,')) return icon;
-  return bundledCardIcons.has(id) ? `assets/activity-icons/${id}.png` : '';
+  return repositoryCardIcon(id, icon);
 }
 
 function baseCard({ id, name, description, category, version, matches, icon = '', local = false }) {
   const card = element('article', 'activity-card');
-  if (bundledCardIcons.has(id)) card.classList.add(`activity-${id}`);
+  if (/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id)) card.classList.add(`activity-${id}`);
   const art = element('div', 'card-art');
   const artIcon = cardIcon(id, icon);
   if (artIcon) {
@@ -278,7 +282,12 @@ function renderInstalled() {
     return;
   }
   for (const record of installed) {
-    const { card, actions } = baseCard({ ...record, local: record.source?.type === 'local' });
+    const catalogIcon = catalog?.activities?.find((entry) => entry.id === record.id)?.icon || '';
+    const { card, actions } = baseCard({
+      ...record,
+      icon: record.icon || catalogIcon,
+      local: record.source?.type === 'local',
+    });
     const statusText = {
       detected: 'Site detected',
       waiting: 'Waiting for site',

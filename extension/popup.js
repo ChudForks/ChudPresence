@@ -50,6 +50,16 @@ function sourceName(track) {
   return track?.activityName || 'Playback';
 }
 
+function isYouTubeMusicTrack(track) {
+  return track?.activityId === 'youtube-music' || track?.source === 'youtubeMusic';
+}
+
+function showYouTubeMusicPauseMark(track, title) {
+  if (!title || !isYouTubeMusicTrack(track)) return false;
+  if (track.playback?.state) return track.playback.state === 'paused';
+  return track.playing === false;
+}
+
 function renderInstalledActivityTiles() {
   const serviceGrid = document.querySelector('.service-grid');
   serviceGrid.querySelectorAll('[data-activity-id]').forEach((tile) => tile.remove());
@@ -262,6 +272,10 @@ function renderDashboard(state) {
     artEl.hidden = true;
     artFallback.hidden = false;
   }
+
+  const showPauseMark = showYouTubeMusicPauseMark(track, title);
+  document.getElementById('pause-mark').hidden = !showPauseMark;
+  document.getElementById('service-mark').hidden = showPauseMark;
 
   titleEl.title = titleEl.textContent;
   artistEl.title = artistEl.textContent;

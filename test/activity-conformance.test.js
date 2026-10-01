@@ -1857,11 +1857,10 @@ test('a queue-style YouTube Music URL update keeps the same document eligible to
   }), nextSender)).ok, true);
   assert.equal(reports.at(-1).track.media.title, 'Next track');
 
-  assert.equal(shouldInvalidateActivityTab({ status: 'loading', url: 'https://music.youtube.com/new-page' }), true);
-  await manager.invalidateTab(24);
+  assert.equal(shouldInvalidateActivityTab({ status: 'loading', url: 'https://music.youtube.com/new-page' }), false);
   assert.equal((await manager.handleUserScriptMessage(activityRequest(manager, 'presence.report', {
-    report: activityReport('Old document'),
-  }), nextSender)).error.code, 'stale_document');
+    report: activityReport('Still playing'),
+  }), nextSender)).ok, true);
   assert.equal(shouldInvalidateActivityTab({ discarded: true }), true);
 });
 
@@ -1886,20 +1885,18 @@ test('Hulu-style loading updates accept the same document immediately and still 
   await report(child, 'Player');
 
   for (const update of [{ status: 'loading', url: 'https://example.com/watch/next' }, { status: 'loading' }]) {
-    assert.equal(shouldInvalidateActivityTab(update), true);
+    assert.equal(shouldInvalidateActivityTab(update), false);
     assert.equal(shouldRetireActivityTab(update), false);
-    await manager.invalidateTab(25, { retireDocuments: shouldRetireActivityTab(update) });
-    assert.equal((await manager.listInstalled())[0].activeFrames.length, 0);
+    assert.equal((await manager.listInstalled())[0].activeFrames.length, 2);
     assert.equal((await report({ ...top, url: 'https://example.com/watch/next' }, 'Next episode')).ok, true);
     assert.equal(reports.at(-1).track.media.title, 'Next episode');
     assert.equal((await report(child, 'Same player')).ok, true);
   }
-  assert.ok(clears.some((args) => args[2] === 'hulu-document'));
 
-  // A real replacement after loading must still reject the old top and child.
-  await manager.invalidateTab(25, { retireDocuments: false });
+  // A real replacement after loading must clear the old top and child.
   const replacement = { ...top, documentId: 'replacement-document' };
   assert.equal((await report(replacement, 'New page')).ok, true);
+  assert.ok(clears.some((args) => args[2] === 'hulu-document'));
   assert.equal((await report(top, 'Late old episode')).error.code, 'stale_document');
   assert.equal((await report(child, 'Late old player')).error.code, 'stale_document');
 

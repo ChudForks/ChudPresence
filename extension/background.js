@@ -8,6 +8,7 @@ import {
 } from './core/default-activity.js';
 import { shouldInvalidateActivityTab, shouldRetireActivityTab } from './core/tab-lifecycle.js';
 import { createPresenceIntent } from './core/presence.js';
+import { createPresenceClearDelay } from './core/presence-clear-delay.js';
 import {
   applicationIdForPresence,
   DEFAULT_SETTINGS,
@@ -49,6 +50,7 @@ let activeTabId = null;
 let settings = { ...DEFAULT_SETTINGS };
 let delivery = presencePublisher.status();
 let pushTimer = 0;
+const transientClear = createPresenceClearDelay(() => publishCurrentActivity());
 
 registerActivityRestoreHandlers({
   runtime: chrome.runtime,
@@ -118,10 +120,15 @@ function setAction(track) {
   chrome.action.setTitle({ title: title ? `${title}${suffix}` : EXTENSION_NAME });
 }
 
-async function publishCurrentActivity({ closing = false } = {}) {
+async function publishCurrentActivity({ closing = false, delayClear = false } = {}) {
   const track = currentTrack();
   setAction(track);
   const intent = localPresenceIntent(track);
+  if (!intent && delayClear && !closing) {
+    transientClear.defer();
+    return;
+  }
+  transientClear.cancel();
   const applicationId = applicationIdForPresence();
   delivery = await presencePublisher.publish(intent, applicationId, { closing });
 }
@@ -141,7 +148,7 @@ function schedulePublish() {
   if (pushTimer) return;
   pushTimer = setTimeout(() => {
     pushTimer = 0;
-    publishCurrentActivity();
+    publishCurrentActivity({ delayClear: true });
   }, 250);
 }
 
@@ -169,7 +176,7 @@ function onTabGone(tabId, { closing = false, retireDocuments = true } = {}) {
   clearActiveTab(tabId);
   if (!known) return;
   pingRemaining();
-  publishCurrentActivity({ closing });
+  publishCurrentActivity({ closing, delayClear: !closing });
 }
 
 function onDocumentGone(tabId, documentId, { closing = false, frameId = null } = {}) {
@@ -178,7 +185,7 @@ function onDocumentGone(tabId, documentId, { closing = false, frameId = null } =
   if (!known) return;
   clearActiveTab(tabId);
   pingRemaining();
-  publishCurrentActivity({ closing });
+  publishCurrentActivity({ closing, delayClear: !closing });
 }
 
 async function handleActivityLibraryMessage(message) {
@@ -203,7 +210,7 @@ async function handleActivityLibraryMessage(message) {
     if (removed && message.id === 'youtube') {
       await rememberBundledYouTubeRemoval(chrome.storage.local);
     }
-    schedulePublish();
+    publishCurrentActivity();
     return { removed };
   }
   if (message.type === 'ACTIVITY_RELOAD') {
@@ -213,12 +220,12 @@ async function handleActivityLibraryMessage(message) {
   }
   if (message.type === 'ACTIVITY_SET_ENABLED') {
     const result = await activityManager.setEnabled(message.id, Boolean(message.enabled));
-    schedulePublish();
+    publishCurrentActivity();
     return result;
   }
   if (message.type === 'ACTIVITY_SET_PREFERENCES') {
     const result = await activityManager.setPreferences(message.id, message.preferences);
-    schedulePublish();
+    publishCurrentActivity();
     return result;
   }
   if (message.type === 'ACTIVITY_SET_SETTING') {
@@ -397,8 +404,8 @@ chrome.runtime.onConnect.addListener((port) => {
 chrome.tabs.onRemoved.addListener((tabId) => onTabGone(tabId, { closing: true }));
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  // Loading can accompany a same-document route change. Clear the presence,
-  // but let the next report's document ID establish whether it was replaced.
+  // A loading update can accompany a player or route change in the same
+  // document. Its report remains valid until that document ends or is replaced.
   if (shouldInvalidateActivityTab(changeInfo)) {
     onTabGone(tabId, { retireDocuments: shouldRetireActivityTab(changeInfo) });
   }

@@ -115,8 +115,8 @@ test('uses generic song, movie, and stream report semantics', () => {
     }),
     activityName: 'Stream Activity',
   }, 1_000_000);
-  assert.equal(stream.type, 'streaming');
-  assert.equal(stream.streamUrl, 'https://stream.example.com/live');
+  assert.equal(stream.type, 'watching');
+  assert.equal(stream.streamUrl, undefined);
   assert.equal(stream.state, 'Creator • Live');
 });
 
@@ -143,6 +143,33 @@ test('applies installed Activity status, artwork, timer, and button preferences'
   assert.equal(intent.assets, null);
   assert.equal(intent.timestamps, null);
   assert.deepEqual(intent.buttons, []);
+});
+
+test('forwards a paused album-art badge as the small image', () => {
+  const intent = createPresenceIntent({
+    activityId: 'youtube-music',
+    activityName: 'YouTube Music',
+    kind: 'song',
+    media: { title: 'A Song', artist: 'An Artist', album: 'An Album' },
+    playback: { state: 'paused', position: 12, duration: 180 },
+    display: { details: 'A Song', state: 'An Artist' },
+    artwork: {
+      large: 'https://example.com/cover.png',
+      largeText: 'An Album',
+      small: 'https://example.com/pause.png',
+      smallText: 'Paused',
+    },
+    visibility: 'normal',
+  }, 1_000_000);
+
+  assert.equal(intent.timestamps, null);
+  assert.equal(intent.state, 'An Artist • Paused');
+  assert.deepEqual(intent.assets, {
+    largeImage: 'https://example.com/cover.png',
+    largeText: 'An Album',
+    smallImage: 'https://example.com/pause.png',
+    smallText: 'Paused',
+  });
 });
 
 test('omits timers while paused and rejects unsafe URLs', () => {
@@ -376,7 +403,8 @@ test('uses a generic Activity report for Twitch live presence', () => {
   }, 1_000_000, { statusDisplay: 'artist' });
 
   assert.equal(live.name, 'Twitch');
-  assert.equal(live.type, 'streaming');
+  assert.equal(live.type, 'watching');
+  assert.equal(live.streamUrl, undefined);
   assert.equal(live.state, 'Streamer • Live');
   assert.equal(live.statusDisplayType, 'state');
   assert.deepEqual(live.timestamps, { start: 925 });

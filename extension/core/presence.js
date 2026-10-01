@@ -125,7 +125,7 @@ function activityType(report) {
           : report.kind === 'song'
             ? 'listening'
             : report.kind === 'stream'
-              ? 'streaming'
+              ? 'watching'
               : report.kind === 'game' || report.kind === 'generic'
                 ? 'playing'
                 : 'watching';
