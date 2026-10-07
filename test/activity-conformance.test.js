@@ -1717,6 +1717,62 @@ test('keeps a background Activity detected between minute-spaced reports', async
   assert.deepEqual(cleared, [['sample-activity', 9, 'music-document', 0]]);
 });
 
+test('document exit clears before Activity cleanup and forwards immediate closing semantics', async () => {
+  const fake = createFakeApi();
+  const cleared = [];
+  const manager = new ActivityManager({ api: fake.api, onClear: (...args) => cleared.push(args) });
+  const activity = activityPackage();
+  activity.source = 'ChudPresence.lifecycle.onCleanup(() => { void ChudPresence.clear().catch(() => {}); });';
+  await manager.install(activity);
+  const sender = {
+    userScriptWorldId: 'chudpresence.activity.sample-activity',
+    tab: { id: 9 }, frameId: 0, documentId: 'closing-document', url: 'https://example.com/watch',
+  };
+  await manager.handleUserScriptMessage(activityRequest(manager, 'presence.report', {
+    report: activityReport('Closing playback'),
+  }), sender);
+  const listeners = new Map();
+  const requests = [];
+  const completions = [];
+  const pageWindow = {
+    location: { href: sender.url },
+    history: { pushState() {}, replaceState() {} },
+    addEventListener(name, listener) {
+      if (!listeners.has(name)) listeners.set(name, new Set());
+      listeners.get(name).add(listener);
+    },
+    removeEventListener(name, listener) { listeners.get(name)?.delete(listener); },
+    setTimeout: () => 1, clearTimeout() {}, setInterval: () => 2, clearInterval() {},
+  };
+  pageWindow.top = pageWindow;
+  pageWindow.window = pageWindow;
+  pageWindow.self = pageWindow;
+  vm.runInNewContext(fake.scripts.get('chudpresence-activity-sample-activity').js[0].code, {
+    window: pageWindow,
+    location: pageWindow.location,
+    history: pageWindow.history,
+    document: { querySelectorAll: () => [], addEventListener() {}, removeEventListener() {} },
+    chrome: { runtime: {
+      sendMessage(message) {
+        requests.push(structuredClone(message));
+        const completion = manager.handleUserScriptMessage(structuredClone(message), sender);
+        completions.push(completion);
+        return completion;
+      },
+      connect: () => ({ onMessage: { addListener() {} }, onDisconnect: { addListener() {} }, disconnect() {} }),
+    } },
+    AbortController, URL, console,
+  });
+  for (const listener of listeners.get('beforeunload')) listener();
+  await Promise.all(completions);
+  assert.equal(requests[0].operation, 'presence.clear');
+  assert.deepEqual(requests[0].payload, { closing: true });
+  assert.equal(requests[1].operation, 'presence.clear');
+  assert.deepEqual(requests[1].payload, {});
+  assert.deepEqual(cleared, [['sample-activity', 9, 'closing-document', 0, { closing: true }]]);
+  assert.equal((await manager.listInstalled())[0].status, 'waiting');
+});
+
 test('supports top and embedded player frames and rejects reports from replaced child documents', async () => {
   const fake = createFakeApi();
   fake.permissions.add('https://player.example.com/*');

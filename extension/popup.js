@@ -304,6 +304,20 @@ function renderLocalDiagnostics(state) {
   document.getElementById('local-presence-intent').textContent = intent
     ? `${intent.details || intent.name || 'Activity'}${intent.state ? ` · ${intent.state}` : ''}`
     : 'Nothing selected';
+  const cleanup = state.delivery?.shutdownCleanup || {};
+  const backup = {
+    deferred: 'Armed (deferred + exit fallback)',
+    'exit-fallback': 'Armed (exit fallback only)',
+    unavailable: 'Unavailable',
+  }[cleanup.state] || 'Not armed';
+  document.getElementById('discord-cleanup-backup').textContent = cleanup.reason
+    ? `${backup} · ${cleanup.reason}` : backup;
+  const lastClear = state.delivery?.lastCleanupAttempt;
+  document.getElementById('discord-cleanup-last').textContent = lastClear
+    ? diagnosticSummary({
+      ...lastClear,
+      title: `${lastClear.source === 'document' ? 'Document exit' : 'Worker'}: ${lastClear.state}${lastClear.httpStatus ? ` (HTTP ${lastClear.httpStatus})` : ''}`,
+    }) : 'None';
 }
 
 async function refresh() {

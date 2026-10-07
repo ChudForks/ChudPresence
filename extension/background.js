@@ -29,11 +29,12 @@ const activityManager = new ActivityManager({
     activityRegistry.update(tabId, documentId, track, frameId);
     schedulePublish();
   },
-  onClear(activityId, tabId, documentId, frameId) {
+  onClear(activityId, tabId, documentId, frameId, { closing = false } = {}) {
     const known = activityRegistry.clearActivity(activityId, tabId, documentId, frameId);
     if (!known) return;
     if (typeof tabId === 'number') clearActiveTab(tabId);
-    schedulePublish();
+    if (closing) publishCurrentActivity({ closing: true });
+    else schedulePublish();
   },
 });
 let defaultInstallPromise = null;

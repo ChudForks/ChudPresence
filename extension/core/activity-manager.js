@@ -251,7 +251,11 @@ function scriptDefinition(record, extensionVersion = '0.0.0') {
     '    try { delete globalThis.__chudpresenceActivityGeneration; } catch {}',
     '    return true;',
     '  };',
-    '  const __onDocumentEnd = () => __endLifecycle("document-destroyed");',
+    '  const __onDocumentEnd = () => {',
+    '    if (__lifecycleEnded) return;',
+    '    try { void __request("presence.clear", { closing: true }).catch(() => {}); } catch {}',
+    '    __endLifecycle("document-destroyed");',
+    '  };',
     '  const __matchesActivity = (message) => message?.type === "CHUDPRESENCE_ACTIVITY_ABORT" &&',
     '    message.activityId === __activityIdentity.activityId && message.activityVersion === __activityIdentity.activityVersion;',
     '  window.addEventListener("pagehide", __onDocumentEnd, { once: true });',
@@ -2121,7 +2125,11 @@ export class ActivityManager {
       frames.delete(frameId);
       if (!frames.size) tabs.delete(tabId);
       if (!tabs.size) this.lastSeen.delete(id);
-      await this.onClear(id, tabId, messageDocumentId, frameId);
+      if (structured && message.payload?.closing === true) {
+        await this.onClear(id, tabId, messageDocumentId, frameId, { closing: true });
+      } else {
+        await this.onClear(id, tabId, messageDocumentId, frameId);
+      }
       return respond(true, { cleared: true, stale: false });
     }
 

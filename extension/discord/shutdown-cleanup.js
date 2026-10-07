@@ -8,6 +8,11 @@ let creatingDocument = null;
 let nextRequestId = 1;
 const connectionWaiters = new Set();
 const pendingResponses = new Map();
+const cleanupObservers = new Set();
+
+export function onShutdownCleanup(listener) {
+  cleanupObservers.add(listener);
+}
 
 function rejectPendingResponses(message) {
   for (const { reject, timer } of pendingResponses.values()) {
@@ -25,6 +30,12 @@ chrome.runtime.onConnect.addListener((port) => {
   connectionWaiters.clear();
 
   port.onMessage.addListener((message) => {
+    if (message?.type === 'CLEANUP_EVENT' && ['started', 'confirmed', 'failed'].includes(message.state)) {
+      const httpStatus = Number.isInteger(message.httpStatus) && message.httpStatus >= 100 && message.httpStatus <= 599
+        ? message.httpStatus : null;
+      for (const observer of cleanupObservers) observer({ state: message.state, httpStatus });
+      return;
+    }
     const pending = pendingResponses.get(message?.replyTo);
     if (!pending) return;
     pendingResponses.delete(message.replyTo);
@@ -99,10 +110,14 @@ async function sendCommand(command) {
 
 export async function armShutdownCleanup(accessToken, sessionToken) {
   const result = await sendCommand({ type: 'ARM', accessToken, sessionToken });
-  if (!result.supported && await hasCleanupDocument()) {
-    await chrome.offscreen.closeDocument();
-  }
-  return result.supported;
+  // The document also owns a pagehide/keepalive fallback. Closing it when
+  // fetchLater is unsupported would send cleanup while presence is active.
+  return {
+    armed: result.armed === true,
+    deferred: result.supported === true,
+    reason: ['unsupported', 'QuotaExceededError', 'TypeError', 'NotAllowedError', 'Error'].includes(result.reason)
+      ? result.reason : '',
+  };
 }
 
 export async function disarmShutdownCleanup() {

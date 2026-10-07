@@ -145,7 +145,11 @@ export async function discordRequest(path, options = {}, retry = true) {
 
   const result = await response.json().catch(() => ({}));
   if (response.status === 429) throw rateLimitErrorFromResponse(response, result);
-  if (!response.ok) throw new Error(result.message || `Discord API failed (${response.status}).`);
+  if (!response.ok) {
+    const error = new Error(result.message || `Discord API failed (${response.status}).`);
+    error.status = response.status;
+    throw error;
+  }
   return result;
 }
 

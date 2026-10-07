@@ -469,6 +469,17 @@ test('Activity status labels customize only option text and retain saved values'
   assert.equal(activityCard(popup, activity.id).querySelector('[data-setting="status"]').value, 'artist');
 });
 
+test('popup exposes browser-close fallback and a failed Discord cleanup outcome', async () => {
+  const popup = await createPopupHarness({ state: {
+    delivery: {
+      shutdownCleanup: { state: 'exit-fallback', reason: 'unsupported' },
+      lastCleanupAttempt: { state: 'failed', source: 'document', httpStatus: 403, timestamp: 1_700_000_000_000 },
+    },
+  } });
+  assert.equal(popup.document.getElementById('discord-cleanup-backup').textContent, 'Armed (exit fallback only) · unsupported');
+  assert.match(popup.document.getElementById('discord-cleanup-last').textContent, /^Document exit: failed \(HTTP 403\)/);
+});
+
 test('active dynamic Activity uses its own name and package icon while Chromium diagnostics remain visible', async () => {
   const activity = {
     id: 'fresh-service-id', name: 'Fresh Service Name', enabled: true,
