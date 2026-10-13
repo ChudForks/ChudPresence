@@ -124,7 +124,7 @@ export function isSemanticVersion(value) {
   if (typeof value !== 'string') return false;
   const match = value.match(SEMVER);
   if (!match) return false;
-  return !match[4] || match[4].split('.').every((identifier) =>
+  return !match[4] || match[4].slice(1).split('.').every((identifier) =>
     !/^\d+$/.test(identifier) || identifier === '0' || !identifier.startsWith('0'),
   );
 }

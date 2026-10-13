@@ -1,6 +1,46 @@
 # Chromium Activity Lab verification
 
-## Current automated gates (October 2, 2026)
+## Library scroll-jump regression (October 13, 2026)
+
+The three-second Library poll could move a scrolled page upward after a settings area had been scrolled. Installed rendering emptied the live grid, attached its first card, and restored that card's settings scroll before attaching the remaining rows. This forced browser layout while the document was temporarily shorter. Hovering a lower card exposed the timing but was not the cause.
+
+Discover, Installed, and Updates now construct their card lists detached and replace each grid once. Installed settings scrolling is restored after the complete grid is attached. A focused card action is restored with `preventScroll`; a newly disabled Reload action falls back to Enable/Disable.
+
+An isolated browser fixture reproduced four failures before the fix: desktop scroll position `795` fell to `205`, and narrow scroll position `3919` fell to `279`, with and without hover. After the fix, all four cases retained their exact positions in both Edge and Brave; eight ordinary scroll/hover/settings/action cases also passed in Edge. Two permanent UI regressions cover action focus and disabled Reload fallback. `npm run check`, all 207 tests, `npm run build`, and `git diff --check` passed. The browser fixture uses synthetic backend state and a 32-setting Activity to exercise nonzero settings scrolling, without accessing a live browser profile.
+
+## Uniform Activity card layout verification (October 13, 2026)
+
+Installed cards now reserve consistent artwork, title/status, description, settings, and action areas. The grid gives every card the same height across rows, and action buttons use consistent widths and positions. Activities without settings show a reserved empty state; longer settings lists scroll within their 176px area. Disabled Activities retain a disabled Reload control in Developer mode. Settings scroll position survives visible and hidden polling and view changes.
+
+The isolated Edge fixture used metadata and icons from all seven official packages with mixed enabled/local states. All card widths, heights, and section/footer offsets matched at 1280px (four columns), 800px (two), and 390px/320px (one), with Developer mode on and off. Heights were 592px with Developer actions and 550px without. A 32-setting stress case kept the last control reachable and preserved its scroll position through visible and hidden polls. There was no page overflow or clipped action/control geometry. Desktop screenshots were visually inspected. `npm run check`, all 205 tests, `npm run build`, and `git diff --check` passed.
+
+## Developer console verification (October 13, 2026)
+
+The Developer view now contains one selectable console with Activity, diagnostic kind, and log-level filters; Copy visible and Select all controls; paused snapshots; and scoped history clearing. Installed cards link directly to an Activity's logs. History clearing removes logs, completed network history, and diagnostic snapshots while preserving live presence, settings, Activity storage, registrations, upgrade transitions, and running requests.
+
+`npm run check`, `npm test` (205 tests), `npm run build`, and `git diff --check` passed. New regressions cover readable formatting and counts, filter combinations, clipboard success/fallback, selection during pending polls, paused snapshot immutability, Activity selection changes, scoped/all clearing and retry behavior, stale polls completing after a clear, clear-success/refresh-failure feedback, extension-page access controls, invalid scopes, and requests that finish after clearing.
+
+An isolated headless Microsoft Edge check served the actual Library files with synthetic Activity/backend fixtures. It verified clipboard text (allowing Windows newline normalization), Activity/level filters, text selection across a polling interval, pause/filter behavior, selected/all clearing, and a 390-pixel layout with no page overflow. Desktop and narrow screenshots were inspected under `browser-profiles/developer-console-*.png`. This verifies UI behavior with fixtures; it does not exercise live service playback or Discord.
+
+## Bugfix sweep verification (October 13, 2026)
+
+The sweep started from clean working trees at lab commit `99673da` and Activities commit `fc9d856`. Node.js 24.21.0 and npm 11.19.0 passed the final automated gates below. These results cover local fixes and deterministic regression fixtures; live website playback and Discord OAuth/API behavior were not exercised during this sweep.
+
+| Repository | Gate | Result |
+| --- | --- | --- |
+| Chromium lab | `npm run check` | Passed syntax, manifest, shared contract, seven-package catalog hashes, and bundled YouTube parity |
+| Chromium lab | `npm test` | 183 tests passed (162 before the sweep) |
+| Chromium lab | `npm run build` | Passed; unpacked 1.9.0 build and zip refreshed under `dist/` |
+| Activities | `npm run check:contract`, `npm run check:catalog`, `npm run typecheck` | Passed |
+| Activities | `npm test` | 65 tests passed (55 before the sweep), including the SDK scaffold test |
+| Activities | `node tools/check-version-bumps.mjs` | Passed against its default `HEAD^` base; the three locally edited packages also increase their versions above `HEAD` |
+| Both | `git diff --check` | Passed |
+
+Regression coverage includes imperative Activity injection URL/frame scope, playing-frame selection and per-Activity paused preferences, runtime rollback after storage failures, SemVer precedence and numeric prerelease validation, local package file-read races, settings recovery and polling while editing, concurrent Discord initialization/disconnect, and short-lived OAuth expiration. Package fixtures cover YouTube seeks to zero and player-state precedence, finite live DVR windows on Kick/Twitch, and repository metadata URL validation.
+
+YouTube is now `1.0.3` in both the catalog and bundled extension copy; Kick and Twitch are `1.0.2`. The catalog hashes were regenerated. To exercise these local changes, reload the extension and replace already-installed package sources through the Library's Developer view. Discover reads the remote repository, so it will expose these package versions after publication.
+
+## Automated gates (October 2, 2026)
 
 The documentation refresh checked the current working trees with Node.js 24.21.0 and npm 11.19.0. The lab is version 1.9.0 at committed base `2d59909`, including the existing uncommitted browser-close changes. The separate Activities checkout is at `ec0341a` with seven catalog packages. These checks do not constitute new browser verification.
 

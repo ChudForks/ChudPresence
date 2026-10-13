@@ -1,5 +1,6 @@
 import { ACTIVITY_REPOSITORY, compareActivityVersions, downloadActivity, fetchCatalog, readCatalogCache } from './core/activity-repository.js';
 import { requestHostPermissions } from './core/activity-permissions.js';
+import { diagnosticEntryCount, formatDeveloperDiagnostics } from './core/developer-diagnostics.js';
 import {
   MAX_ACTIVITY_ICON_BYTES,
   validateActivityIcon,
@@ -25,13 +26,124 @@ const selectedFiles = document.getElementById('selected-files');
 const developerEnabled = document.getElementById('developer-enabled');
 const developerPanel = document.getElementById('developer-panel');
 const userScriptsDialog = document.getElementById('user-scripts-dialog');
+const logActivity = document.getElementById('developer-log-activity');
+const logKind = document.getElementById('developer-log-kind');
+const logLevel = document.getElementById('developer-log-level');
+const logOutput = document.getElementById('developer-log-output');
+const logPause = document.getElementById('developer-pause-logs');
+const logStatus = document.getElementById('developer-log-status');
+const clearLogsButton = document.getElementById('developer-clear-logs');
 
 let catalog = null;
 let installed = [];
 let pendingLocalPackage = null;
+let localSelectionRevision = 0;
 let userScriptsAvailable = false;
 let nextPermissionStep = '';
 let libraryDiagnostics = { grantedOrigins: [], finalPresenceIntent: null };
+let developerSnapshot = null;
+let developerActivityOptions = '';
+let libraryRefreshRevision = 0;
+const installedSettingsScroll = new Map();
+
+function rememberInstalledSettingsScroll() {
+  if (document.getElementById('installed-view').hidden) return;
+  for (const card of installedList.children) {
+    const slot = card.querySelector('.card-settings-slot');
+    if (slot) installedSettingsScroll.set(card.dataset.activityId, slot.scrollTop);
+  }
+}
+
+function restoreInstalledSettingsScroll() {
+  for (const card of installedList.children) {
+    const slot = card.querySelector('.card-settings-slot');
+    if (slot) slot.scrollTop = installedSettingsScroll.get(card.dataset.activityId) || 0;
+  }
+}
+
+function renderDeveloperConsole({ force = false, capture = false } = {}) {
+  if (!developerEnabled.checked) return;
+  const options = installed.map(({ id, name }) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  const optionsKey = JSON.stringify(options);
+  if (optionsKey !== developerActivityOptions) {
+    const selected = logActivity.value;
+    logActivity.replaceChildren(new Option('All Activities', ''));
+    for (const { id, name } of options) logActivity.add(new Option(name, id));
+    logActivity.value = options.some(({ id }) => id === selected) ? selected : '';
+    developerActivityOptions = optionsKey;
+  }
+  const selected = installed.find(({ id }) => id === logActivity.value);
+  clearLogsButton.textContent = selected ? `Clear ${selected.name} history` : 'Clear all history';
+  logLevel.disabled = !['all', 'logs'].includes(logKind.value);
+  const held = document.activeElement === logOutput;
+  document.getElementById('developer-log-update').textContent = logPause.checked
+    ? 'Updates paused. New diagnostics continue to collect.'
+    : held ? 'Text focused · updates held for selection.' : 'Live · updates every 3 seconds.';
+  if (!force && developerSnapshot && (logPause.checked || held)) return;
+  if (!developerSnapshot || capture || (!logPause.checked && !held)) {
+    developerSnapshot = { records: structuredClone(installed), ...structuredClone(libraryDiagnostics) };
+  }
+  const filters = { activityId: logActivity.value, kind: logKind.value, level: logLevel.value };
+  const text = formatDeveloperDiagnostics(developerSnapshot.records, { ...developerSnapshot, ...filters });
+  if (text !== logOutput.value) {
+    const scrollTop = logOutput.scrollTop;
+    logOutput.value = text;
+    logOutput.scrollTop = scrollTop;
+  }
+  const count = diagnosticEntryCount(developerSnapshot.records, filters);
+  document.getElementById('developer-log-count').textContent = logKind.value === 'snapshots'
+    ? `${count} ${count === 1 ? 'Activity' : 'Activities'}` : `${count} ${count === 1 ? 'entry' : 'entries'}`;
+}
+
+function logFeedback(message, error = false) {
+  logStatus.textContent = message;
+  logStatus.classList.toggle('error', error);
+}
+
+function selectDeveloperLogs() {
+  logOutput.focus();
+  logOutput.select();
+  renderDeveloperConsole();
+}
+
+async function copyDeveloperLogs() {
+  const visibleText = logOutput.value;
+  try {
+    if (!globalThis.navigator?.clipboard?.writeText) throw new Error('Clipboard unavailable');
+    await navigator.clipboard.writeText(visibleText);
+    logFeedback('Visible diagnostics copied.');
+  } catch {
+    selectDeveloperLogs();
+    logFeedback('Use Ctrl+C to copy the selected diagnostics.', true);
+  }
+}
+
+async function clearDeveloperLogs() {
+  const id = logActivity.value;
+  const name = installed.find((record) => record.id === id)?.name || 'all Activities';
+  clearLogsButton.disabled = true;
+  let cleared = false;
+  try {
+    const result = await extensionMessage({ type: 'ACTIVITY_CLEAR_DIAGNOSTICS', ...(id ? { id } : {}) });
+    cleared = true;
+    libraryRefreshRevision += 1;
+    await refreshInstalled();
+    renderDeveloperConsole({ force: true, capture: true });
+    const pending = result.pendingNetworkRequests || 0;
+    logFeedback(`History cleared for ${name}.${pending ? ` ${pending} network request${pending === 1 ? ' is' : 's are'} still running.` : ''}`);
+  } catch (error) {
+    logFeedback(cleared ? `History cleared, but the view could not refresh: ${error.message}`
+      : error.message || 'Could not clear diagnostic history.', true);
+  } finally {
+    clearLogsButton.disabled = false;
+  }
+}
+
+function showActivityLogs(id) {
+  logActivity.value = id;
+  showView('developer');
+  renderDeveloperConsole({ force: true, capture: !logPause.checked });
+}
 
 async function requestRepositoryPermission() {
   const origins = ['https://raw.githubusercontent.com/*', 'https://api.github.com/*'];
@@ -155,6 +267,7 @@ function baseCard({ id, name, description, category, version, matches, icon = ''
   const top = element('div', 'card-top');
   const identity = element('div', 'card-identity');
   const heading = element('h3', '', name);
+    heading.title = name;
   identity.append(heading);
   const badge = element('span', `badge status-badge${local ? ' local' : ''}`, local ? 'Local' : '');
   if (!local) badge.hidden = true;
@@ -170,7 +283,7 @@ function baseCard({ id, name, description, category, version, matches, icon = ''
 }
 
 function renderDiscover() {
-  discoverList.replaceChildren();
+  const cards = [];
   const entries = catalog?.activities || [];
   const query = searchInput.value.trim().toLowerCase();
   const category = categoryFilter.value;
@@ -181,9 +294,11 @@ function renderDiscover() {
     return matchesQuery && (category === 'all' || entry.category === category);
   });
   if (!filtered.length) {
-    appendEmpty(discoverList, catalog ? 'No matching Activities' : 'Catalog not connected', catalog
+    const empty = element('div');
+    appendEmpty(empty, catalog ? 'No matching Activities' : 'Catalog not connected', catalog
       ? 'Try a different search or category.'
       : 'Use Refresh catalog to connect to ChudForks/ChudPresence-Activities.');
+    discoverList.replaceChildren(...empty.children);
     return;
   }
 
@@ -207,8 +322,9 @@ function renderDiscover() {
       actions.append(actionButton('Installed', 'secondary', () => showView('installed'), true));
     }
     card.append(actions);
-    discoverList.append(card);
+    cards.push(card);
   }
+  discoverList.replaceChildren(...cards);
 }
 
 function renderActivitySettings(record, card) {
@@ -253,6 +369,7 @@ function renderActivitySettings(record, card) {
     }
     control.setAttribute('aria-label', setting.label);
     control.addEventListener('change', async () => {
+      const previous = record.settingValues?.[setting.id] ?? setting.default;
       const value = setting.type === 'boolean'
         ? control.checked
         : setting.type === 'number' || setting.type === 'range'
@@ -260,12 +377,25 @@ function renderActivitySettings(record, card) {
           : control.value;
       control.disabled = true;
       status.textContent = '';
+      let saved = false;
       try {
-        await extensionMessage({ type: 'ACTIVITY_SET_SETTING', id: record.id, settingId: setting.id, value });
+        const result = await extensionMessage({ type: 'ACTIVITY_SET_SETTING', id: record.id, settingId: setting.id, value });
+        record.settingValues = { ...record.settingValues, [setting.id]: result.value ?? value };
+        saved = true;
         await refreshInstalled();
       } catch (error) {
-        await refreshInstalled();
-        setHeaderStatus(error.message || 'Could not save this setting.', 'error');
+        if (!saved) {
+          if (setting.type === 'boolean') control.checked = previous;
+          else control.value = String(previous);
+          const output = row.querySelector('output');
+          if (output) { output.value = control.value; output.textContent = control.value; }
+        }
+        status.textContent = saved
+          ? `Saved, but Activity state could not refresh: ${error.message}`
+          : error.message || 'Could not save this setting.';
+        setHeaderStatus(status.textContent, 'error');
+      } finally {
+        control.disabled = false;
       }
     });
     row.append(control);
@@ -276,9 +406,19 @@ function renderActivitySettings(record, card) {
 }
 
 function renderInstalled() {
-  installedList.replaceChildren();
+  rememberInstalledSettingsScroll();
+  const active = document.activeElement;
+  const focusedActivityId = active?.closest?.('.installed-activity-card')?.dataset.activityId;
+  const focusedAction = ['activity-logs-action', 'activity-reload-action', 'activity-toggle-action', 'activity-remove-action']
+    .find((className) => active?.matches?.(`.${className}`));
+  const cards = [];
+  for (const id of installedSettingsScroll.keys()) {
+    if (!installed.some((record) => record.id === id)) installedSettingsScroll.delete(id);
+  }
   if (!installed.length) {
-    appendEmpty(installedList, 'No Activities installed', 'Browse Discover or load a local Activity in Developer.');
+    const empty = element('div');
+    appendEmpty(empty, 'No Activities installed', 'Browse Discover or load a local Activity in Developer.');
+    installedList.replaceChildren(...empty.children);
     return;
   }
   for (const record of installed) {
@@ -288,6 +428,9 @@ function renderInstalled() {
       icon: record.icon || catalogIcon,
       local: record.source?.type === 'local',
     });
+    card.classList.add('installed-activity-card');
+    card.classList.toggle('has-developer-actions', developerEnabled.checked);
+    card.dataset.activityId = record.id;
     const statusText = {
       detected: 'Site detected',
       waiting: 'Waiting for site',
@@ -302,53 +445,39 @@ function renderInstalled() {
     badge.title = record.error || '';
     badge.className = `badge status-badge${record.status === 'detected' ? ' active' : ['incompatible', 'permission-missing', 'error'].includes(record.status) ? ' issue' : record.source?.type === 'local' ? ' local' : ''}`;
     badge.hidden = false;
+    const settingsSlot = element('div', 'card-settings-slot');
+    renderActivitySettings(record, settingsSlot);
+    if (!record.settings?.length) {
+      settingsSlot.classList.add('is-empty');
+      settingsSlot.append(element('span', '', 'No additional settings'));
+    }
+    card.append(settingsSlot);
     if (developerEnabled.checked) {
-      const contexts = record.frameContexts || [];
-      const requests = record.networkRequests || [];
-      const isCurrentIntent = libraryDiagnostics.finalPresenceIntent?.source === record.id;
-      const diagnosticLines = [
-        `Activity ID: ${record.id}`,
-        `Current Activity version: ${record.version}`,
-        `Installed repository revision: ${record.source?.revision || 'not recorded'}`,
-        `Installed code SHA-256: ${record.source?.codeSha256 || 'not recorded'}`,
-        `Installed metadata SHA-256: ${record.source?.metadataSha256 || 'not recorded'}`,
-        `Installed icon SHA-256: ${record.source?.iconSha256 || 'not recorded'}`,
-        `Frame scope: ${record.frames || 'top'}`,
-        ...(contexts.length
-          ? contexts.map((frame) => `${frame.state} ${frame.frameId === 0 ? 'top frame' : `frame ${frame.frameId}`} · ${frame.senderUrl} · document ${frame.documentId || 'unknown'}${frame.retiredDocumentIds?.length ? ` · replaced ${frame.retiredDocumentIds.join(', ')}` : ''}`)
-          : ['No frame reports yet']),
-        `Declared network: ${hostSummary(record.network || []) || 'none'}`,
-        `Granted origins: ${hostSummary(libraryDiagnostics.grantedOrigins || []) || 'none'}`,
-        `Current settings: ${JSON.stringify(record.settingValues || {})}`,
-        `Visibility: ${contexts.map((frame) => `${frame.frameId === 0 ? 'top' : `frame ${frame.frameId}`}=${frame.visibility || frame.visibilityState || 'unknown'}`).join(', ') || 'unknown'}`,
-        `Playback state: ${record.normalizedReport?.playback?.state || record.rawReport?.playback?.state || 'no accepted playback report'}`,
-        `Current raw report:\n${JSON.stringify(record.rawReport, null, 2) || 'none'}`,
-        `Normalized report:\n${JSON.stringify(record.normalizedReport, null, 2) || 'none'}`,
-        `Final presence intent:\n${JSON.stringify(isCurrentIntent ? libraryDiagnostics.finalPresenceIntent : null, null, 2) || 'none'}`,
-        `Last report: ${JSON.stringify(record.lastReport || null)}`,
-        `Last clear: ${JSON.stringify(record.lastClear || null)}`,
-        `Last error: ${JSON.stringify(record.lastError || null)}`,
-        `Pending upgrade: ${JSON.stringify(record.pendingUpgrade || null)}`,
-        `Last upgrade: ${JSON.stringify(record.lastUpgrade || null)}`,
-        ...requests.map((request) => `${request.method} ${request.url} · tab ${request.tabId} frame ${request.frameId} · ${request.state === 'complete' ? request.status : request.state === 'error' ? request.errorCode : 'pending'} · ${request.durationMs} ms · ${request.responseBytes} bytes`),
-        ...(record.activityLogs || []).map((entry) => `${entry.timestamp} ${entry.level.toUpperCase()} · tab ${entry.tabId} frame ${entry.frameId} · ${JSON.stringify(entry.args)}`),
-      ];
-      const diagnostics = element('div', 'runtime-diagnostics', diagnosticLines.join('\n'));
-      card.append(diagnostics);
+      actions.append(actionButton('View logs', 'secondary activity-logs-action', () => showActivityLogs(record.id)));
+      const reload = actionButton('Reload Activity', 'secondary activity-reload-action',
+        () => reloadActivity(record), !record.enabled || Boolean(record.compatibilityStatus));
+      reload.title = record.compatibilityStatus || (record.enabled ? 'Rerun this Activity' : 'Enable this Activity to reload it');
+      actions.append(reload);
     }
-    renderActivitySettings(record, card);
-    if (developerEnabled.checked && record.enabled && !record.compatibilityStatus) {
-      actions.append(actionButton('Reload Activity', 'secondary', () => reloadActivity(record)));
-    }
-    actions.append(actionButton(record.enabled ? 'Disable' : 'Enable', 'secondary', () => toggleActivity(record)));
-    actions.append(actionButton('Remove', 'secondary remove', () => removeActivity(record)));
+    actions.append(actionButton(record.enabled ? 'Disable' : 'Enable', 'secondary activity-toggle-action', () => toggleActivity(record)));
+    actions.append(actionButton('Remove', 'secondary remove activity-remove-action', () => removeActivity(record)));
     card.append(actions);
-    installedList.append(card);
+    cards.push(card);
+  }
+  // Attach the complete grid before scroll restoration triggers browser layout.
+  // A partially attached grid can temporarily shorten the page and clamp scrollY.
+  installedList.replaceChildren(...cards);
+  restoreInstalledSettingsScroll();
+  if (focusedAction && !document.getElementById('installed-view').hidden) {
+    const card = cards.find((entry) => entry.dataset.activityId === focusedActivityId);
+    const button = card?.querySelector(`.${focusedAction}`);
+    const focusTarget = button?.disabled ? card.querySelector('.activity-toggle-action') : button;
+    focusTarget?.focus({ preventScroll: true });
   }
 }
 
 function renderUpdates() {
-  updatesList.replaceChildren();
+  const cards = [];
   const entries = catalog?.activities || [];
   const installedMap = installedById();
   const pending = entries.filter((entry) => {
@@ -358,9 +487,11 @@ function renderUpdates() {
       compareActivityVersions(entry.version, record.version) > 0;
   });
   if (!pending.length) {
-    appendEmpty(updatesList, 'You’re up to date', catalog
+    const empty = element('div');
+    appendEmpty(empty, 'You’re up to date', catalog
       ? 'No Activity updates are available.'
       : 'Refresh the catalog to check for updates.');
+    updatesList.replaceChildren(...empty.children);
     return;
   }
   for (const entry of pending) {
@@ -369,8 +500,9 @@ function renderUpdates() {
     card.querySelector('.card-description').textContent = `${entry.description} Installed ${formatVersion(record.version)} · latest ${formatVersion(entry.version)}.`;
     actions.append(actionButton(`Update to ${formatVersion(entry.version)}`, 'primary', () => installRepositoryActivity(entry)));
     card.append(actions);
-    updatesList.append(card);
+    cards.push(card);
   }
+  updatesList.replaceChildren(...cards);
 }
 
 function renderAll() {
@@ -378,6 +510,7 @@ function renderAll() {
   renderInstalled();
   renderUpdates();
   refreshCounters();
+  renderDeveloperConsole();
 }
 
 function renderCategories() {
@@ -389,8 +522,10 @@ function renderCategories() {
 }
 
 function showView(view) {
+  rememberInstalledSettingsScroll();
   for (const button of document.querySelectorAll('.tab')) button.classList.toggle('is-active', button.dataset.view === view);
   for (const section of document.querySelectorAll('.view')) section.hidden = section.id !== `${view}-view`;
+  if (view === 'installed') restoreInstalledSettingsScroll();
 }
 
 function describeCatalog(cached, fetchedAt) {
@@ -402,8 +537,11 @@ function describeCatalog(cached, fetchedAt) {
   }
 }
 
-async function refreshInstalled() {
+async function refreshInstalled({ polling = false } = {}) {
+  const revision = ++libraryRefreshRevision;
   const state = await extensionMessage({ type: 'ACTIVITY_LIBRARY_STATE' });
+  if (revision !== libraryRefreshRevision) return;
+  if (polling && document.activeElement?.closest('.activity-settings')) return;
   installed = state.installed || [];
   libraryDiagnostics = {
     grantedOrigins: state.grantedOrigins || [],
@@ -568,6 +706,7 @@ async function readActivityIcon(file) {
 }
 
 async function updateSelectedFiles() {
+  const revision = ++localSelectionRevision;
   const { metadataFile, sourceFile, iconFile } = filesForLocalPackage();
   pendingLocalPackage = null;
   loadLocalButton.disabled = true;
@@ -579,6 +718,7 @@ async function updateSelectedFiles() {
     const [metadataText, source, icon] = await Promise.all([
       metadataFile.text(), sourceFile.text(), readActivityIcon(iconFile),
     ]);
+    if (revision !== localSelectionRevision) return;
     const metadata = validateActivityMetadata(JSON.parse(metadataText));
     validateActivitySource(source);
     if (Boolean(metadata.icon) !== Boolean(icon)) {
@@ -588,6 +728,7 @@ async function updateSelectedFiles() {
     selectedFiles.textContent = `${metadata.name} ${formatVersion(metadata.version)} ready to load.`;
     loadLocalButton.disabled = false;
   } catch (error) {
+    if (revision !== localSelectionRevision) return;
     selectedFiles.textContent = error.message || 'Those files are not a valid Activity package.';
   }
 }
@@ -631,8 +772,18 @@ async function initialize() {
   loadLocalButton.addEventListener('click', loadLocalActivity);
   developerEnabled.addEventListener('change', async () => {
     developerPanel.hidden = !developerEnabled.checked;
+    renderAll();
     await api.storage.local.set({ developerMode: developerEnabled.checked });
   });
+  for (const control of [logActivity, logKind, logLevel]) {
+    control.addEventListener('change', () => renderDeveloperConsole({ force: true }));
+  }
+  logPause.addEventListener('change', () => renderDeveloperConsole({ force: true, capture: !logPause.checked }));
+  logOutput.addEventListener('focus', () => renderDeveloperConsole());
+  logOutput.addEventListener('blur', () => renderDeveloperConsole());
+  document.getElementById('developer-copy-logs').addEventListener('click', copyDeveloperLogs);
+  document.getElementById('developer-select-logs').addEventListener('click', selectDeveloperLogs);
+  clearLogsButton.addEventListener('click', clearDeveloperLogs);
 
   const [cache, localSettings] = await Promise.all([
     readCatalogCache().catch(() => ({ catalog: null, fetchedAt: 0 })),
@@ -645,7 +796,10 @@ async function initialize() {
   renderCategories();
   await refreshInstalled().catch((error) => setHeaderStatus(error.message, 'error'));
   setInterval(() => {
-    if (!document.hidden) refreshInstalled().catch(() => {});
+    const editingSetting = document.activeElement?.closest('.activity-settings');
+    if (!document.hidden && !editingSetting && !clearLogsButton.disabled) {
+      refreshInstalled({ polling: true }).catch(() => {});
+    }
   }, 3000);
   renderAll();
   if (catalog) {

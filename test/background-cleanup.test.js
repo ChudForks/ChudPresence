@@ -11,9 +11,10 @@ import * as settings from '../extension/core/settings.js';
 const source = (await readFile(new URL('../extension/background.js', import.meta.url), 'utf8'))
   .replace(/^import[\s\S]*?from '[^']+';\r?\n/gm, '');
 
-async function createBackgroundHarness() {
+async function createBackgroundHarness(activityPreferences = {}) {
   const timers = new Map();
   const publications = [];
+  const diagnosticClears = [];
   let nextTimer = 0;
   let managerCallbacks;
   const schedule = (callback, delay) => {
@@ -38,7 +39,12 @@ async function createBackgroundHarness() {
       constructor(callbacks) { managerCallbacks = callbacks; }
       restoreAll() { return Promise.resolve(); }
       invalidateTab() { return Promise.resolve(); }
-      preferencesFor() { return {}; }
+      preferencesFor(id) { return activityPreferences[id] || {}; }
+      async clearDiagnostics(id) {
+        diagnosticClears.push(id);
+        return { id, activityLogsCleared: 2, networkRequestsCleared: 1,
+          diagnosticsCleared: 1, pendingNetworkRequests: 0 };
+      }
     },
     createPresenceClearDelay: (callback) => createPresenceClearDelay(callback, { schedule, cancel }),
     registerActivityRestoreHandlers() {},
@@ -59,7 +65,9 @@ async function createBackgroundHarness() {
   });
   await Promise.resolve();
   return {
-    callbacks: managerCallbacks, timers, publications,
+    callbacks: managerCallbacks, timers, publications, diagnosticClears,
+    sendMessage: (message, url = 'chrome-extension://test/activities.html') => new Promise((resolve) =>
+      chrome.runtime.onMessage.listeners[0](message, { url }, resolve)),
     removeTab: (tabId) => removed.listeners[0](tabId),
     runTimer(delay) {
       const [id, timer] = [...timers].find(([, entry]) => entry.delay === delay);
@@ -100,4 +108,49 @@ test('a late document-exit clear cannot remove a replacement report', async () =
   harness.report('replacement-document');
   harness.callbacks.onClear('music', 9, 'source-document', 0, { closing: true });
   assert.equal(harness.publications.length, 0);
+});
+
+test('publishes an eligible paused frame when a newer frame hides paused presence', async () => {
+  const harness = await createBackgroundHarness({ music: { showPaused: true }, video: { showPaused: false } });
+  harness.callbacks.onReport({
+    tabId: 9, documentId: 'music-document', frameId: 3,
+    track: { activityId: 'music', title: 'Paused song', playing: false },
+  });
+  harness.callbacks.onReport({
+    tabId: 9, documentId: 'video-document', frameId: 4,
+    track: { activityId: 'video', title: 'Paused video', playing: false },
+  });
+  harness.runTimer(250);
+
+  assert.equal(harness.publications.length, 1);
+  assert.equal(harness.publications[0].intent.details, 'Paused song');
+  assert.equal(harness.publications[0].intent.source, 'music');
+});
+
+test('permits diagnostic clearing only from extension pages', async () => {
+  const harness = await createBackgroundHarness();
+  const denied = await harness.sendMessage({ type: 'ACTIVITY_CLEAR_DIAGNOSTICS', id: 'music' }, 'https://example.com/watch');
+  assert.equal(denied.ok, false);
+  assert.match(denied.error, /only available on extension pages/);
+  assert.deepEqual(harness.diagnosticClears, []);
+
+  const selected = await harness.sendMessage({ type: 'ACTIVITY_CLEAR_DIAGNOSTICS', id: 'music' });
+  assert.equal(selected.ok, true);
+  assert.equal(selected.result.id, 'music');
+  assert.equal(selected.result.activityLogsCleared, 2);
+  const all = await harness.sendMessage({ type: 'ACTIVITY_CLEAR_DIAGNOSTICS' });
+  assert.equal(all.ok, true);
+  assert.equal(all.result.id, null);
+  assert.deepEqual(harness.diagnosticClears, ['music', null]);
+  assert.equal(harness.publications.length, 0);
+});
+
+test('rejects malformed diagnostic-clear scopes instead of clearing all Activities', async () => {
+  const harness = await createBackgroundHarness();
+  for (const id of [undefined, 0, false, [], {}]) {
+    const response = await harness.sendMessage({ type: 'ACTIVITY_CLEAR_DIAGNOSTICS', id });
+    assert.equal(response.ok, false);
+    assert.match(response.error, /valid Activity ID/);
+  }
+  assert.deepEqual(harness.diagnosticClears, []);
 });

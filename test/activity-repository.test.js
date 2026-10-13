@@ -1,8 +1,19 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { downloadActivity, validateCatalog } from '../extension/core/activity-repository.js';
+import { compareActivityVersions, downloadActivity, validateCatalog } from '../extension/core/activity-repository.js';
 
 const originalFetch = globalThis.fetch;
+
+test('orders Activity updates by SemVer precedence rather than locale collation', () => {
+  const versions = ['1.0.0-1', '1.0.0-Z', '1.0.0-a-b', '1.0.0-alpha', '1.0.0-alpha.2',
+    '1.0.0-alpha.10', '1.0.0-beta', '1.0.0'];
+  for (let index = 1; index < versions.length; index += 1) {
+    assert.equal(compareActivityVersions(versions[index - 1], versions[index]), -1);
+    assert.equal(compareActivityVersions(versions[index], versions[index - 1]), 1);
+  }
+  assert.equal(compareActivityVersions('1.0.0+new-build', '1.0.0+old-build'), 0);
+  assert.equal(compareActivityVersions('1.0.0-alpha.9007199254740993', '1.0.0-alpha.9007199254740992'), 1);
+});
 
 async function sha256(value) {
   const bytes = typeof value === 'string' ? new TextEncoder().encode(value) : value;

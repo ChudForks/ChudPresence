@@ -208,6 +208,12 @@ function scriptDefinition(record, extensionVersion = '0.0.0') {
   const code = [
     '(() => {',
     "  'use strict';",
+    // Imperative execute() targets frames directly and does not apply the
+    // registered script's URL filters. Check them before starting any runtime.
+    `  const __matchesUrl = ${safeMatch.toString()};`,
+    `  if (!${JSON.stringify(record.metadata.matches)}.some((pattern) => __matchesUrl(pattern, location.href)) ||`,
+    `      ${JSON.stringify(record.metadata.excludeMatches || [])}.some((pattern) => __matchesUrl(pattern, location.href))) return;`,
+    ...(record.metadata.frames === 'all' ? [] : ['  if (window !== window.top) return;']),
     '  const __activityIdentity = Object.freeze(' + JSON.stringify({
     activityId: id,
     activityVersion: record.metadata.version,
@@ -941,6 +947,36 @@ export class ActivityManager {
     this.activityDiagnostics.set(id, previous);
   }
 
+  async clearDiagnostics(id = null) {
+    if (id !== null) {
+      if (!isActivityId(id)) throw new TypeError('A valid Activity ID is required to clear its diagnostics.');
+      const record = (await this.load())[id];
+      if (!record || record.metadata?.id !== id) throw new Error(`Activity ${id} is not installed.`);
+    }
+    const inScope = (activityId) => id === null || activityId === id;
+    const activityLogsBefore = this.activityLogs.length;
+    this.activityLogs = this.activityLogs.filter((entry) => !inScope(entry.activityId));
+    const networkRequestsBefore = this.networkDiagnostics.length;
+    // Running requests hold these diagnostic objects until they finish. Keep
+    // them visible and leave their cancellation/concurrency state untouched.
+    this.networkDiagnostics = this.networkDiagnostics.filter((entry) =>
+      !inScope(entry.activityId) || entry.state === 'pending');
+    let diagnosticsCleared = 0;
+    for (const activityId of this.activityDiagnostics.keys()) {
+      if (!inScope(activityId)) continue;
+      this.activityDiagnostics.delete(activityId);
+      diagnosticsCleared += 1;
+    }
+    return {
+      id,
+      activityLogsCleared: activityLogsBefore - this.activityLogs.length,
+      networkRequestsCleared: networkRequestsBefore - this.networkDiagnostics.length,
+      diagnosticsCleared,
+      pendingNetworkRequests: this.networkDiagnostics.filter((entry) =>
+        inScope(entry.activityId) && entry.state === 'pending').length,
+    };
+  }
+
   setActivitySetting(id, settingId, value) {
     return this.serialize(() => this.setActivitySettingInternal(id, settingId, value));
   }
@@ -1204,7 +1240,9 @@ export class ActivityManager {
     try {
       const tabs = await this.api.tabs.query({ url: patterns });
       return (Array.isArray(tabs) ? tabs : []).filter((tab) =>
-        Number.isInteger(tab?.id) && tab.discarded !== true && patterns.some((pattern) => safeMatch(pattern, tab.url || '')),
+        Number.isInteger(tab?.id) && tab.discarded !== true &&
+        patterns.some((pattern) => safeMatch(pattern, tab.url || '')) &&
+        !(record.metadata.excludeMatches || []).some((pattern) => safeMatch(pattern, tab.url || '')),
       );
     } catch {
       return [];
@@ -1252,6 +1290,7 @@ export class ActivityManager {
     for (const record of Object.values(records)) {
       const patterns = Array.isArray(record?.metadata?.matches) ? record.metadata.matches : [];
       if (!record?.enabled || !patterns.some((pattern) => safeMatch(pattern, rawUrl))) continue;
+      if ((record.metadata.excludeMatches || []).some((pattern) => safeMatch(pattern, rawUrl))) continue;
       if (await this.injectActivityTab(record, { id: tabId })) injected += 1;
     }
     return injected;
@@ -1319,7 +1358,9 @@ export class ActivityManager {
       await this.save();
     } catch (error) {
       records[id] = previous;
-      if (previous.enabled) await this.register(previous).catch(() => {});
+      if (previous.enabled) {
+        await this.register(previous).then(() => this.injectMatchingTabs(previous)).catch(() => {});
+      }
       throw error;
     }
     try {
@@ -1327,7 +1368,9 @@ export class ActivityManager {
     } catch (error) {
       records[id] = previous;
       await this.save().catch(() => {});
-      if (previous.enabled) await this.register(previous).catch(() => {});
+      if (previous.enabled) {
+        await this.register(previous).then(() => this.injectMatchingTabs(previous)).catch(() => {});
+      }
       throw error;
     }
     this.activityDiagnostics.delete(id);
@@ -1413,8 +1456,14 @@ export class ActivityManager {
       record.enabled = wasEnabled;
       if (wasPermissionMissing === undefined) delete record.permissionMissing;
       else record.permissionMissing = wasPermissionMissing;
-      if (enabled && !wasEnabled) await this.unregister(id).catch(() => {});
-      else if (!enabled && wasEnabled) await this.register(record).catch(() => {});
+      if (enabled && !wasEnabled) {
+        await this.notifyActivityTeardown(id, 'enable-failed').catch(() => {});
+        await this.unregister(id).catch(() => {});
+        this.lastSeen.delete(id);
+        await this.onClear(id);
+      } else if (!enabled && wasEnabled) {
+        await this.register(record).then(() => this.injectMatchingTabs(record)).catch(() => {});
+      }
       throw error;
     }
     return { id, enabled: record.enabled };

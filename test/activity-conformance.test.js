@@ -252,14 +252,13 @@ test('a newer bundled YouTube Activity updates an installed copy without enablin
     const filename = url.slice('test-extension://'.length);
     return new Response(await readFile(new URL(`../extension/${filename}`, import.meta.url)));
   });
-  assert.equal(bundled.metadata.version, '1.0.2');
   await manager.install({ ...bundled, metadata: { ...bundled.metadata, version: '1.0.1' } });
   await manager.setEnabled('youtube', false);
   fake.data[DEFAULT_YOUTUBE_DECISION_KEY] = 'installed';
 
   assert.equal(await ensureBundledYouTubeInstalled({ manager, storage: fake.api.storage.local,
     api: fake.api, loadPackage: async () => bundled }), 'installed');
-  assert.equal((await manager.get('youtube')).metadata.version, '1.0.2');
+  assert.equal((await manager.get('youtube')).metadata.version, bundled.metadata.version);
   assert.equal((await manager.get('youtube')).enabled, false);
   assert.equal(fake.scripts.has('chudpresence-activity-youtube'), false);
 });
@@ -420,7 +419,7 @@ test('provides a frozen ChudPresence runtime with report, page, and network help
   const scope = vm.createContext({
     window: pageWindow, location: pageWindow.location, history: pageWindow.history, chrome,
     document, MutationObserver: FakeMutationObserver,
-    Date, Math, Object, Proxy, Reflect, WeakMap, AbortController,
+    Date, Math, Object, Proxy, Reflect, WeakMap, AbortController, URL,
   });
   vm.runInContext(script, scope);
   const installedCapability = fake.data.installedActivities['sample-activity'].capability;
@@ -1531,6 +1530,119 @@ test('records report lifecycle diagnostics and bounds Activity logs', async () =
   assert.deepEqual(state.grantedOrigins, ['https://example.com/*']);
 });
 
+test('clears selected or all diagnostics while preserving live Activity and pending network state', async () => {
+  const fake = createFakeApi();
+  fake.permissions.add('https://api.example.com/*');
+  const reports = [];
+  const clears = [];
+  const manager = new ActivityManager({ api: fake.api, fetchImpl: fake.fetchImpl,
+    onReport: (report) => reports.push(report), onClear: (...args) => clears.push(args) });
+  const activity = activityPackage();
+  activity.metadata.network = ['https://api.example.com/*'];
+  activity.metadata.settings = [{ id: 'showTitle', type: 'boolean', label: 'Show title', default: true }];
+  await manager.install(activity);
+  activity.metadata.version = '1.1.0';
+  await manager.install(activity);
+  const other = activityPackage();
+  other.metadata.id = 'other-activity';
+  other.metadata.network = ['https://api.example.com/*'];
+  await manager.install(other);
+  await manager.setPreferences('sample-activity', { showArtwork: false });
+  await manager.setActivitySetting('sample-activity', 'showTitle', false);
+  const senderFor = (id) => ({
+    userScriptWorldId: `chudpresence.activity.${id}`,
+    tab: { id: id === 'sample-activity' ? 53 : 54 }, frameId: 0,
+    documentId: `${id}-document`, url: 'https://example.com/watch',
+  });
+  const request = (id, operation, payload, requestId = operation) =>
+    manager.handleUserScriptMessage(activityRequest(manager, operation, payload, requestId, id), senderFor(id));
+  for (const id of ['sample-activity', 'other-activity']) {
+    await request(id, 'presence.report', { report: activityReport(id) });
+    await request(id, 'presence.clear', {});
+    await request(id, 'presence.report', { report: activityReport(id) });
+    await request(id, 'presence.report', { report: { kind: 'invalid' } });
+    await request(id, 'log.write', { level: 'info', args: ['Before clear'] });
+    await request(id, 'storage.set', { key: 'retained', value: 'Activity data' });
+    await request(id, 'net.fetch', { url: 'https://api.example.com/completed' });
+    await connectActivity(fake, manager, senderFor(id), manager.records[id].metadata.version);
+  }
+  let releaseRequest;
+  let startRequest;
+  const started = new Promise((resolve) => { startRequest = resolve; });
+  fake.setFetchImplementation(() => new Promise((resolve) => { releaseRequest = resolve; startRequest(); }));
+  const pendingRequest = request('sample-activity', 'net.fetch', { url: 'https://api.example.com/pending' }, 'pending-network');
+  await started;
+  const pendingDiagnostic = manager.networkDiagnostics.find((entry) => entry.requestId === 'pending-network');
+  const liveFrames = manager.lastSeen.get('sample-activity');
+  const record = manager.records['sample-activity'];
+  const persistedState = structuredClone(fake.data);
+  const registeredScripts = structuredClone([...fake.scripts]);
+  const livePorts = manager.activityPorts.get('sample-activity');
+  const reportsBefore = reports.length;
+  const clearsBefore = clears.length;
+
+  assert.deepEqual(await manager.clearDiagnostics('sample-activity'), {
+    id: 'sample-activity', activityLogsCleared: 1, networkRequestsCleared: 1,
+    diagnosticsCleared: 1, pendingNetworkRequests: 1,
+  });
+  let installed = await manager.listInstalled();
+  const selected = installed.find((entry) => entry.id === 'sample-activity');
+  assert.equal(selected.status, 'detected');
+  assert.deepEqual(selected.activityLogs, []);
+  for (const field of ['rawReport', 'normalizedReport', 'lastReport', 'lastClear', 'lastError', 'lastUpgrade']) {
+    assert.equal(selected[field], null);
+  }
+  assert.deepEqual(selected.pendingUpgrade, { fromVersion: '1.0.0', toVersion: '1.1.0' });
+  assert.equal(installed.find((entry) => entry.id === 'other-activity').activityLogs.length, 1);
+  assert.equal(manager.lastSeen.get('sample-activity'), liveFrames);
+  assert.equal(manager.records['sample-activity'], record);
+  assert.equal(manager.activityPorts.get('sample-activity'), livePorts);
+  assert.equal(reports.length, reportsBefore);
+  assert.equal(clears.length, clearsBefore);
+  assert.deepEqual(fake.data, persistedState);
+  assert.deepEqual([...fake.scripts], registeredScripts);
+  assert.equal(manager.activeNetworkRequests, 1);
+  assert.equal(manager.activeNetworkByActivity.get('sample-activity'), 1);
+  assert.equal(manager.networkDiagnostics.includes(pendingDiagnostic), true);
+
+  assert.deepEqual(await manager.clearDiagnostics(), {
+    id: null, activityLogsCleared: 1, networkRequestsCleared: 1,
+    diagnosticsCleared: 1, pendingNetworkRequests: 1,
+  });
+  releaseRequest(new Response('{"afterClear":true}', { headers: { 'content-type': 'application/json' } }));
+  const completed = await pendingRequest;
+  assert.equal(completed.ok, true);
+  assert.deepEqual(completed.data.data, { afterClear: true });
+  assert.equal(pendingDiagnostic.state, 'complete');
+  assert.equal(manager.networkDiagnostics[0], pendingDiagnostic);
+  assert.equal(manager.activeNetworkRequests, 0);
+  assert.equal(manager.activeNetworkByActivity.has('sample-activity'), false);
+  assert.deepEqual(await manager.clearDiagnostics(), {
+    id: null, activityLogsCleared: 0, networkRequestsCleared: 1,
+    diagnosticsCleared: 0, pendingNetworkRequests: 0,
+  });
+  installed = await manager.listInstalled();
+  assert.equal(installed.every((entry) => entry.status === 'detected'), true);
+  assert.equal(manager.records['sample-activity'], record);
+  assert.deepEqual(fake.data, persistedState);
+});
+
+test('rejects invalid or unknown diagnostic Activity IDs without clearing history', async () => {
+  const fake = createFakeApi();
+  const manager = new ActivityManager({ api: fake.api });
+  await manager.install(activityPackage());
+  const sender = {
+    userScriptWorldId: 'chudpresence.activity.sample-activity',
+    tab: { id: 53 }, frameId: 0, documentId: 'diagnostic-document', url: 'https://example.com/watch',
+  };
+  await manager.handleUserScriptMessage(activityRequest(manager, 'log.write', { level: 'info', args: ['Keep'] }), sender);
+  for (const id of ['', false, 0, [], {}, 'Not an Activity ID']) {
+    await assert.rejects(manager.clearDiagnostics(id), /valid Activity ID/);
+  }
+  await assert.rejects(manager.clearDiagnostics('missing-activity'), /not installed/);
+  assert.equal(manager.activityLogs.length, 1);
+});
+
 test('installs an Activity into an already open matching tab', async () => {
   const fake = createFakeApi();
   fake.api.tabs.query = async ({ url }) => {
@@ -1562,6 +1674,60 @@ test('injects an enabled Activity when a same-document URL enters its match patt
   assert.equal(injection.worldId, 'chudpresence.activity.sample-activity');
   assert.equal(injection.injectImmediately, true);
   assert.equal(await manager.injectMatchingTab(79, 'https://other.example/watch/1'), 0);
+});
+
+test('applies Activity URL exclusions to existing tabs and same-document injection', async () => {
+  const fake = createFakeApi();
+  fake.api.tabs.query = async () => [
+    { id: 77, url: 'https://example.com/watch/1' },
+    { id: 78, url: 'https://example.com/private/account' },
+  ];
+  const manager = new ActivityManager({ api: fake.api });
+  const activity = activityPackage();
+  activity.metadata.excludeMatches = ['https://example.com/private/*'];
+  await manager.install(activity);
+
+  assert.deepEqual(fake.pageExecutions.map((injection) => injection.target.tabId), [77]);
+  assert.equal(await manager.injectMatchingTab(78, 'https://example.com/private/account'), 0);
+  assert.equal(fake.pageExecutions.length, 1);
+});
+
+test('imperative Activity scripts start only in declared URLs and permitted frames', async () => {
+  const fake = createFakeApi();
+  const manager = new ActivityManager({ api: fake.api });
+  const activity = activityPackage();
+  activity.metadata.excludeMatches = ['https://example.com/private/*'];
+  activity.source = 'globalThis.__started = true;';
+  await manager.install(activity);
+  const run = (url, isTop = true) => {
+    const pageWindow = {
+      location: { href: url },
+      addEventListener() {}, removeEventListener() {},
+      setTimeout: () => 1, clearTimeout() {}, setInterval: () => 2, clearInterval() {},
+    };
+    pageWindow.top = isTop ? pageWindow : {};
+    const context = {
+      window: pageWindow, location: pageWindow.location, URL, AbortController,
+      chrome: { runtime: { connect: () => ({ onMessage: { addListener() {} }, onDisconnect: { addListener() {} } }) } },
+    };
+    vm.runInNewContext(fake.scripts.get('chudpresence-activity-sample-activity').js[0].code, context);
+    return { started: pageWindow.__started === true, generation: context.__chudpresenceActivityGeneration };
+  };
+
+  for (const url of [
+    'https://example.com/private/account',
+    'https://other.example/watch',
+    'http://example.com/watch',
+    'about:blank',
+  ]) assert.deepEqual(run(url), { started: false, generation: undefined });
+  assert.deepEqual(run('https://example.com/watch', false), { started: false, generation: undefined });
+  assert.equal(run('https://example.com/watch').started, true);
+
+  activity.metadata.frames = 'all';
+  await manager.install(activity);
+  assert.equal(run('https://example.com/watch', false).started, true);
+  assert.deepEqual(run('https://other.example/watch', false), { started: false, generation: undefined });
+  assert.deepEqual(run('https://example.com/private/account', false), { started: false, generation: undefined });
 });
 
 test('reloads an installed Activity in its active Chrome document without restarting the service worker', async () => {
@@ -2262,20 +2428,76 @@ test('rolls back script registration and in-memory records if storage fails', as
 
 test('restores the prior enabled script if saving a disable fails', async () => {
   const fake = createFakeApi();
+  fake.api.tabs.query = async () => [{ id: 57, url: 'https://example.com/watch' }];
   const manager = new ActivityManager({ api: fake.api });
   await manager.install(activityPackage());
   const sender = {
     userScriptWorldId: 'chudpresence.activity.sample-activity',
     tab: { id: 57 }, frameId: 0, documentId: 'disable-rollback-document', url: 'https://example.com/watch',
   };
+  await connectActivity(fake, manager, sender);
+  const injectionsBeforeDisable = fake.pageExecutions.length;
   fake.failNextWrite();
 
   await assert.rejects(manager.setEnabled('sample-activity', false), /Simulated storage failure/);
   assert.equal(fake.scripts.has('chudpresence-activity-sample-activity'), true);
   assert.equal((await manager.listInstalled())[0].enabled, true);
+  assert.equal(fake.sentMessages.at(-1).message.reason, 'disabled');
+  assert.equal(fake.pageExecutions.length, injectionsBeforeDisable + 1);
+  assert.equal(fake.pageExecutions.at(-1).target.tabId, 57);
   assert.equal((await manager.handleUserScriptMessage(activityRequest(manager, 'presence.report', {
     report: activityReport('Still enabled'),
   }, 'disable-rollback-report'), sender)).ok, true);
+});
+
+test('restarts active Activities when uninstall storage fails', async () => {
+  for (const failStorageRemoval of [false, true]) {
+    const fake = createFakeApi();
+    fake.api.tabs.query = async () => [{ id: 57, url: 'https://example.com/watch' }];
+    const manager = new ActivityManager({ api: fake.api });
+    await manager.install(activityPackage());
+    const sender = {
+      userScriptWorldId: 'chudpresence.activity.sample-activity',
+      tab: { id: 57 }, frameId: 0, documentId: 'uninstall-rollback-document', url: 'https://example.com/watch',
+    };
+    await connectActivity(fake, manager, sender);
+    await manager.handleUserScriptMessage(activityRequest(manager, 'storage.set', { key: 'keep', value: true }), sender);
+    const injectionsBeforeRemove = fake.pageExecutions.length;
+    if (failStorageRemoval) fake.api.storage.local.remove = async () => { throw new Error('Simulated storage removal failure'); };
+    else fake.failNextWrite();
+
+    await assert.rejects(manager.remove('sample-activity'), /Simulated storage/);
+    assert.equal(fake.scripts.has('chudpresence-activity-sample-activity'), true);
+    assert.equal((await manager.get('sample-activity')).enabled, true);
+    assert.equal(fake.sentMessages.at(-1).message.reason, 'uninstalled');
+    assert.equal(fake.pageExecutions.length, injectionsBeforeRemove + 1);
+    assert.equal(fake.pageExecutions.at(-1).target.tabId, 57);
+    assert.equal(fake.data['chudpresence.activityStorage:sample-activity:keep'], true);
+  }
+});
+
+test('stops a newly enabled runtime when saving enabled state fails', async () => {
+  const fake = createFakeApi();
+  const manager = new ActivityManager({ api: fake.api });
+  await manager.install(activityPackage());
+  await manager.setEnabled('sample-activity', false);
+  const sender = {
+    userScriptWorldId: 'chudpresence.activity.sample-activity',
+    tab: { id: 57 }, frameId: 0, documentId: 'enable-rollback-document', url: 'https://example.com/watch',
+  };
+  const execute = fake.api.userScripts.execute;
+  fake.api.tabs.query = async () => [{ id: 57, url: sender.url }];
+  fake.api.userScripts.execute = async (injection) => {
+    await connectActivity(fake, manager, sender);
+    return execute(injection);
+  };
+  fake.failNextWrite();
+
+  await assert.rejects(manager.setEnabled('sample-activity', true), /Simulated storage failure/);
+  assert.equal((await manager.get('sample-activity')).enabled, false);
+  assert.equal(fake.scripts.has('chudpresence-activity-sample-activity'), false);
+  assert.equal(fake.sentMessages.at(-1).message.reason, 'enable-failed');
+  assert.equal(manager.activityPorts.has('sample-activity'), false);
 });
 
 test('keeps the previous Activity operational when an update fails before commit', async () => {

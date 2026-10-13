@@ -53,8 +53,24 @@
 
       <section class="view" id="developer-view" aria-labelledby="developer-title" hidden>
         <div class="view-heading"><h2 id="developer-title">Developer Mode</h2></div>
-        <label class="developer-toggle"><span><strong>Enable developer tools</strong><small>Show local Activity loading controls on this browser.</small></span><input id="developer-enabled" type="checkbox" /></label>
+        <label class="developer-toggle"><span><strong>Enable developer tools</strong><small>Show Activity logs and local package loading on this browser.</small></span><input id="developer-enabled" type="checkbox" /></label>
         <div class="developer-panel" id="developer-panel" hidden>
+          <section class="developer-console" aria-labelledby="developer-logs-title">
+            <div class="console-heading"><div><h3 id="developer-logs-title">Activity logs</h3><p>Choose an Activity to inspect its logs, network requests, and playback diagnostics.</p></div><span class="console-count" id="developer-log-count">0 entries</span></div>
+            <div class="console-filters">
+              <label>Activity<select id="developer-log-activity"><option value="">All Activities</option></select></label>
+              <label>Show<select id="developer-log-kind"><option value="all">All diagnostics</option><option value="logs">Activity logs</option><option value="network">Network requests</option><option value="snapshots">Playback &amp; runtime</option></select></label>
+              <label>Log level<select id="developer-log-level"><option value="all">All levels</option><option value="debug">Debug</option><option value="info">Info</option><option value="warn">Warnings</option><option value="error">Errors</option></select></label>
+            </div>
+            <div class="console-toolbar">
+              <div class="console-actions"><button class="button primary" id="developer-copy-logs" type="button">Copy visible</button><button class="button secondary" id="developer-select-logs" type="button">Select all</button><button class="button secondary" id="developer-clear-logs" type="button">Clear all history</button></div>
+              <label class="console-pause"><input id="developer-pause-logs" type="checkbox" />Pause updates</label>
+            </div>
+            <textarea class="console-output" id="developer-log-output" aria-label="Activity diagnostic logs" readonly spellcheck="false" wrap="off" rows="20">No diagnostic history yet.</textarea>
+            <div class="console-footer"><span class="muted" id="developer-log-update">Updates every 3 seconds. Selecting text holds the view.</span><span class="console-feedback" id="developer-log-status" role="status" aria-live="polite"></span></div>
+            <p class="console-help">Clear history starts a fresh testing session for the selected Activity. New entries continue to arrive while playback runs.</p>
+          </section>
+          <h3>Load a local Activity</h3>
           <p>Select an Activity's <code>metadata.json</code> and <code>activity.js</code> together. Add <code>icon.png</code> if its metadata declares an icon. Set metadata <code>frames</code> to <code>all</code> to run the same bundled script in every matching frame; <code>ChudPresence.runtime.frame.isTop</code> identifies the top page. Local Activities stay on this device.</p>
           <label class="file-picker">Activity files<input id="local-files" type="file" accept=".json,.js,.png,application/json,text/javascript,image/png" multiple /></label>
           <div class="selected-files" id="selected-files">Choose both required files to continue.</div>
@@ -63,7 +79,7 @@
         </div>
         <div class="developer-guide">
           <h3>Activity API v1</h3>
-          <p>Scripts run in an isolated Chromium <code>USER_SCRIPT</code> world. Chrome 138 and newer may require <strong>Allow User Scripts</strong> on this extension’s details page. An Activity may report from the top page or, when configured, matching embedded frames. Developer Mode shows reports, final local presence intent, settings, granted origins, frame and document lifecycles, recent logs and network requests. Use Reload Activity to rerun the current package in its active documents.</p>
+          <p>Scripts run in an isolated Chromium <code>USER_SCRIPT</code> world. Chrome 138 and newer may require <strong>Allow User Scripts</strong> on this extension’s details page. An Activity may report from the top page or, when configured, matching embedded frames. Use Activity logs above to filter, copy, and clear diagnostic history. Installed cards also offer View logs and Reload Activity.</p>
           <pre><code>ChudPresence.report({
   kind: "episode",
   media: {

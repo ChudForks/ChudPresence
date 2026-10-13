@@ -347,7 +347,8 @@ export function compareActivityVersions(left, right) {
     const bNumeric = /^\d+$/.test(b.prerelease[index]);
     if (aNumeric && bNumeric) return BigInt(a.prerelease[index]) < BigInt(b.prerelease[index]) ? -1 : 1;
     if (aNumeric !== bNumeric) return aNumeric ? -1 : 1;
-    return a.prerelease[index].localeCompare(b.prerelease[index]);
+    // SemVer uses ASCII ordering, independent of the browser's locale.
+    return a.prerelease[index] < b.prerelease[index] ? -1 : 1;
   }
   return 0;
 }

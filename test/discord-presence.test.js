@@ -15,7 +15,7 @@ const source = (await readFile(new URL('../extension/discord/presence.js', impor
   .replace(/^import[\s\S]*?from '[^']+';\r?\n/gm, '')
   .replace(/^export const /gm, 'const ');
 
-function createHarness({ authenticated = true, storage, request = async () => null, beforeRemove = async () => {}, cleanup = { armed: true, deferred: true, reason: '' } } = {}) {
+function createHarness({ authenticated = true, storage, request = async () => null, beforeGet = async () => {}, beforeRemove = async () => {}, beforeRevoke = async () => {}, cleanup = { armed: true, deferred: true, reason: '' } } = {}) {
   const local = storage?.local || { [SESSION_KEY]: 'existing-session' };
   const session = storage?.session || {};
   const calls = [];
@@ -43,7 +43,9 @@ function createHarness({ authenticated = true, storage, request = async () => nu
   function storageArea(data) {
     return {
       async get(keys) {
-        return Object.fromEntries([].concat(keys).map((key) => [key, structuredClone(data[key])]));
+        const result = Object.fromEntries([].concat(keys).map((key) => [key, structuredClone(data[key])]));
+        await beforeGet(keys);
+        return result;
       },
       async set(values) {
         Object.assign(data, structuredClone(values));
@@ -69,7 +71,7 @@ function createHarness({ authenticated = true, storage, request = async () => nu
     getClientId: () => APPLICATION_ID,
     getAccessToken: async () => 'access-token',
     initializeAuth: async () => {},
-    revokeAuthorization: async () => { revocations += 1; authenticated = false; },
+    revokeAuthorization: async () => { revocations += 1; await beforeRevoke(); authenticated = false; },
     armShutdownCleanup: async () => { events.push('arm'); return cleanup; },
     disarmShutdownCleanup: async () => { disarms += 1; events.push('disarm'); },
     onShutdownCleanup: (observer) => { cleanupObserver = observer; },
@@ -124,6 +126,40 @@ test('keeps the token and shutdown cleanup until deletion is confirmed', async (
   assert.equal(harness.disarms, 1);
   assert.ok(harness.events.indexOf('deletion-confirmed') < harness.events.indexOf(`remove:${SESSION_KEY}`));
   assert.ok(harness.events.indexOf(`remove:${SESSION_KEY}`) < harness.events.indexOf('disarm'));
+});
+
+test('concurrent startup cannot restore a stale token over the first published session', async () => {
+  let releaseFirstRead;
+  const firstReadBlocked = new Promise((resolve) => { releaseFirstRead = resolve; });
+  let releaseSecondRead;
+  const secondReadBlocked = new Promise((resolve) => { releaseSecondRead = resolve; });
+  let markFirstRead;
+  const firstRead = new Promise((resolve) => { markFirstRead = resolve; });
+  let reads = 0;
+  const harness = createHarness({
+    storage: { local: {}, session: {} },
+    beforeGet(keys) {
+      if (![].concat(keys).includes(SESSION_KEY)) return;
+      reads += 1;
+      if (reads === 1) { markFirstRead(); return firstReadBlocked; }
+      return secondReadBlocked;
+    },
+    request: async () => ({ token: 'created-session' }),
+  });
+
+  const first = harness.presence.publish(intent, APPLICATION_ID);
+  await firstRead;
+  const second = harness.presence.publish({ ...intent, details: 'Next video' }, APPLICATION_ID);
+  for (let turn = 0; turn < 30; turn += 1) await Promise.resolve();
+  releaseFirstRead();
+  assert.equal((await first).state, 'active');
+  releaseSecondRead();
+  await second;
+  await harness.elapse(4200);
+
+  assert.equal(harness.calls.length, 2);
+  assert.equal(harness.calls[1].body.token, 'created-session');
+  assert.equal(reads, 1);
 });
 
 test('publishes the latest timing correction at the minimum interval without another report', async () => {
@@ -310,6 +346,28 @@ test('does not create a replacement when update and deletion both fail', async (
   assert.equal(harness.calls[1].body.token, 'existing-session');
   assert.equal(harness.storage.local[SESSION_KEY], 'existing-session');
   assert.equal(harness.disarms, 0);
+});
+
+test('finishes disconnecting before a concurrent publish can create another session', async () => {
+  let releaseRevocation;
+  const revocationBlocked = new Promise((resolve) => { releaseRevocation = resolve; });
+  let markRevoking;
+  const revoking = new Promise((resolve) => { markRevoking = resolve; });
+  const harness = createHarness({
+    beforeRevoke() { markRevoking(); return revocationBlocked; },
+    request(call) { return call.path === UPDATE_PATH ? { token: 'orphaned-session' } : null; },
+  });
+
+  const disconnecting = harness.presence.disconnect();
+  await revoking;
+  const publishing = harness.presence.publish(intent, APPLICATION_ID);
+  for (let turn = 0; turn < 30; turn += 1) await Promise.resolve();
+  releaseRevocation();
+
+  assert.equal((await disconnecting).state, 'disconnected');
+  assert.equal((await publishing).state, 'disconnected');
+  assert.deepEqual(harness.calls.map((call) => call.path), [DELETE_PATH]);
+  assert.equal(harness.storage.local[SESSION_KEY], undefined);
 });
 
 test('creates a replacement only after confirmed deletion of the existing session', async () => {

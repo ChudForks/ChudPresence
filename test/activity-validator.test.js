@@ -40,6 +40,16 @@ test('rejects unsupported metadata, broad hosts, and insecure website patterns',
   assert.throws(() => validateActivityMetadata(metadata({ network: ['https://discord.com/api/*'] })), /cannot declare Discord/);
 });
 
+test('rejects leading zeroes in every numeric prerelease version identifier', () => {
+  for (const version of ['1.2.3-01', '1.2.3-01.beta', '1.2.3-beta.01', '1.2.3-00+build']) {
+    assert.throws(() => validateActivityMetadata(metadata({ version })), /semantic version/);
+    assert.throws(() => validateActivityMetadata(metadata({ minExtensionVersion: version })), /semantic version/);
+  }
+  for (const version of ['1.2.3-0', '1.2.3-1.beta', '1.2.3-beta.0', '1.2.3-01beta', '1.2.3+01']) {
+    assert.equal(validateActivityMetadata(metadata({ version })).version, version);
+  }
+});
+
 test('validates discovery metadata and excluded URL patterns', () => {
   const expanded = metadata({
     aliases: ['YT Music', 'YTM'],

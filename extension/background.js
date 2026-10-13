@@ -76,13 +76,11 @@ async function loadSettings() {
 }
 
 function currentTrack() {
-  const eligible = new Map(
-    [...activityRegistry.tracks()].filter(([, track]) => isTrackAllowed(
-      track,
-      settings,
-      track?.activityId ? activityManager.preferencesFor(track.activityId) : null,
-    )),
-  );
+  const eligible = activityRegistry.tracks((track) => isTrackAllowed(
+    track,
+    settings,
+    track?.activityId ? activityManager.preferencesFor(track.activityId) : null,
+  ));
   const selected = selectActivity(eligible, activeTabId);
   activeTabId = selected.tabId;
   return selected.track;
@@ -232,6 +230,12 @@ async function handleActivityLibraryMessage(message) {
   if (message.type === 'ACTIVITY_SET_SETTING') {
     return activityManager.setActivitySetting(message.id, message.settingId, message.value);
   }
+  if (message.type === 'ACTIVITY_CLEAR_DIAGNOSTICS') {
+    if (Object.hasOwn(message, 'id') && message.id !== null && typeof message.id !== 'string') {
+      throw new TypeError('A valid Activity ID is required to clear its diagnostics.');
+    }
+    return activityManager.clearDiagnostics(message.id ?? null);
+  }
   if (message.type === 'ACTIVITY_RESTORE') return activityManager.restoreAll();
   return null;
 }
@@ -296,6 +300,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'ACTIVITY_SET_ENABLED',
     'ACTIVITY_SET_PREFERENCES',
     'ACTIVITY_SET_SETTING',
+    'ACTIVITY_CLEAR_DIAGNOSTICS',
     'ACTIVITY_RESTORE',
   ].includes(message?.type);
   if (libraryMessage) {

@@ -34,6 +34,7 @@ let scheduledUpdateAt = 0;
 let pendingUpdate = null;
 let pendingUpdateApplicationId = '';
 let initialized = false;
+let initializationPromise = null;
 let writeQueue = Promise.resolve();
 let shutdownCleanup = { state: 'not-armed', reason: '' };
 let lastCleanupAttempt = null;
@@ -303,35 +304,43 @@ function enqueue(operation) {
   return writeQueue;
 }
 
+async function loadPersistedSession() {
+  await initializeAuth();
+  const stored = await chrome.storage.local.get([SESSION_STORAGE_KEY, CLEANUP_DIAGNOSTIC_STORAGE_KEY]);
+  const transient = await chrome.storage.session.get(LAST_INTENT_STORAGE_KEY);
+  sessionToken = String(stored[SESSION_STORAGE_KEY] || '');
+  const savedCleanup = stored[CLEANUP_DIAGNOSTIC_STORAGE_KEY];
+  if (savedCleanup && ['started', 'confirmed', 'failed'].includes(savedCleanup.state)) {
+    lastCleanupAttempt = {
+      state: savedCleanup.state,
+      source: savedCleanup.source === 'document' ? 'document' : 'worker',
+      timestamp: Number(savedCleanup.timestamp) || 0,
+      httpStatus: Number.isInteger(savedCleanup.httpStatus) ? savedCleanup.httpStatus : null,
+    };
+  }
+  const savedPresence = transient[LAST_INTENT_STORAGE_KEY] || null;
+  if (savedPresence?.intent) {
+    lastIntent = savedPresence.intent;
+    lastApplicationId = String(savedPresence.applicationId || '');
+  } else {
+    // Migrate the pre-service-profile session shape.
+    lastIntent = savedPresence;
+    lastApplicationId = '';
+  }
+  await chrome.alarms.create(RENEW_ALARM, { periodInMinutes: 10 });
+  await armCurrentShutdownCleanup().catch(() => false);
+  initialized = true;
+  return refreshIdleStatus();
+}
+
 export const discordPresence = Object.freeze({
   async initialize() {
+    if (initializationPromise) return initializationPromise;
     if (initialized) return currentStatus;
-    await initializeAuth();
-    const stored = await chrome.storage.local.get([SESSION_STORAGE_KEY, CLEANUP_DIAGNOSTIC_STORAGE_KEY]);
-    const transient = await chrome.storage.session.get(LAST_INTENT_STORAGE_KEY);
-    sessionToken = String(stored[SESSION_STORAGE_KEY] || '');
-    const savedCleanup = stored[CLEANUP_DIAGNOSTIC_STORAGE_KEY];
-    if (savedCleanup && ['started', 'confirmed', 'failed'].includes(savedCleanup.state)) {
-      lastCleanupAttempt = {
-        state: savedCleanup.state,
-        source: savedCleanup.source === 'document' ? 'document' : 'worker',
-        timestamp: Number(savedCleanup.timestamp) || 0,
-        httpStatus: Number.isInteger(savedCleanup.httpStatus) ? savedCleanup.httpStatus : null,
-      };
-    }
-    const savedPresence = transient[LAST_INTENT_STORAGE_KEY] || null;
-    if (savedPresence?.intent) {
-      lastIntent = savedPresence.intent;
-      lastApplicationId = String(savedPresence.applicationId || '');
-    } else {
-      // Migrate the pre-service-profile session shape.
-      lastIntent = savedPresence;
-      lastApplicationId = '';
-    }
-    await chrome.alarms.create(RENEW_ALARM, { periodInMinutes: 10 });
-    initialized = true;
-    await armCurrentShutdownCleanup().catch(() => false);
-    return refreshIdleStatus();
+    initializationPromise = loadPersistedSession().finally(() => {
+      initializationPromise = null;
+    });
+    return initializationPromise;
   },
 
   status() {
@@ -352,9 +361,13 @@ export const discordPresence = Object.freeze({
 
   async disconnect() {
     await this.initialize();
-    await enqueue(clearSession);
-    await revokeAuthorization();
-    return refreshIdleStatus();
+    return enqueue(async () => {
+      await clearSession();
+      // Keep revocation in the same queue as presence writes. Otherwise a
+      // concurrent publish can create a session with credentials about to go.
+      await revokeAuthorization();
+      return refreshIdleStatus();
+    });
   },
 
   async publish(intent, applicationId = '', { closing = false } = {}) {
