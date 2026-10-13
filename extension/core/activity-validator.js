@@ -381,7 +381,7 @@ function normalizeArtwork(value) {
     if (url) artwork[field] = url;
   }
   for (const field of ['largeText', 'smallText']) {
-    const cleaned = cleanText(value[field], `artwork.${field}`);
+    const cleaned = value[field] === '' ? '' : cleanText(value[field], `artwork.${field}`);
     if (cleaned !== undefined) artwork[field] = cleaned;
   }
   return artwork;

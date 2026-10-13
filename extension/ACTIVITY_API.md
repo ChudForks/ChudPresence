@@ -123,6 +123,8 @@ presence text clickable. `artwork.largeUrl` makes the large image clickable
 when `artwork.large` is present. For a song, use the song URL as `detailsUrl`,
 the displayed artist URL as `stateUrl`, and the album URL as `largeUrl`.
 These links are independent of the two-button limit and must be HTTPS URLs.
+Set `artwork.largeText` to an empty string to omit the artwork text (the third
+line in Discord's music card). Omitting the field uses album or title text.
 
 `ChudPresence.runtime` provides the registered `activityId`, package
 `activityVersion`, `apiVersion`, `extensionVersion`, a frame descriptor, and

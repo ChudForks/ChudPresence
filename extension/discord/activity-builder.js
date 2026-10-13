@@ -36,8 +36,10 @@ export function buildHeadlessActivity(intent, applicationId) {
   if (intent.assets?.largeImage) {
     activity.assets = {
       large_image: intent.assets.largeImage,
-      large_text: intent.assets.largeText || intent.name || EXTENSION_NAME,
     };
+    if (intent.assets.largeText !== '') {
+      activity.assets.large_text = intent.assets.largeText || intent.name || EXTENSION_NAME;
+    }
     if (intent.assets.largeUrl) activity.assets.large_url = intent.assets.largeUrl;
     if (intent.assets.smallImage) activity.assets.small_image = intent.assets.smallImage;
     if (intent.assets.smallText) activity.assets.small_text = intent.assets.smallText;

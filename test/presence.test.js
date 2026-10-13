@@ -2,6 +2,44 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createPresenceIntent } from '../extension/core/presence.js';
 import { normalizeActivityReport } from '../extension/core/activity-validator.js';
+import { buildHeadlessActivity } from '../extension/discord/activity-builder.js';
+
+test('explicitly empty artwork text omits the music card album line through the V1 pipeline', () => {
+  for (const album of [undefined, 'Stale album metadata']) {
+    const report = normalizeActivityReport({
+      kind: 'song',
+      media: { title: 'Boulevard of Broken Dreams', artist: 'Green Day', ...(album ? { album } : {}) },
+      playback: { state: 'playing', position: 168, duration: 260 },
+      artwork: {
+        large: 'https://cdn.example.com/cover.png',
+        largeText: '',
+        largeUrl: 'https://soundcloud.com/green-day/boulevard-of-broken-dreams',
+      },
+    });
+    assert.equal(report.artwork.largeText, '');
+    const intent = createPresenceIntent({ ...report, activityName: 'SoundCloud' }, 1_000_000);
+    const activity = buildHeadlessActivity(intent, '123456789012345678');
+    assert.equal(intent.assets.largeText, '');
+    assert.equal(activity.details, 'Boulevard of Broken Dreams');
+    assert.equal(activity.state, 'Green Day');
+    assert.equal(Object.hasOwn(activity.assets, 'large_text'), false);
+    assert.equal(activity.assets.large_image, report.artwork.large);
+    assert.equal(activity.assets.large_url, report.artwork.largeUrl);
+    assert.deepEqual(activity.timestamps, { start: 832000, end: 1092000 });
+  }
+});
+
+test('omitted artwork text retains the album or title fallback', () => {
+  for (const album of [undefined, 'An Album']) {
+    const report = normalizeActivityReport({
+      kind: 'song', media: { title: 'A Song', ...(album ? { album } : {}) },
+      artwork: { large: 'https://cdn.example.com/cover.png' },
+    });
+    const intent = createPresenceIntent({ ...report, activityName: 'Music' });
+    const activity = buildHeadlessActivity(intent, '123456789012345678');
+    assert.equal(activity.assets.large_text, album || 'A Song');
+  }
+});
 
 function intentWithoutSource(intent) {
   const { source, ...formatting } = intent;

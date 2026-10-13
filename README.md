@@ -9,7 +9,7 @@ This repository contains the **1.9.0 Manifest V3 Chromium development extension*
 | This repository | Chromium runtime, Activity Library, popup, permissions, settings, Discord authorization and publishing, schemas, tests, and local packaging |
 | [`ChudPresence-Activities/`](ChudPresence-Activities/README.md) | Official first-party packages, generated catalog, canonical V1 contract and SDK types, authoring CLI, shared artwork, and package validation |
 
-`ChudPresence-Activities/` is a separate Git checkout ignored by this repository, not a submodule or part of the extension build. Its checked-out catalog contains **67Movies, Crunchyroll, Hulu, Kick, Twitch, YouTube, and YouTube Music**. Discover fetches the official `ChudForks/ChudPresence-Activities` catalog from GitHub; editing the local checkout does not change Discover. Use Developer mode to test local packages.
+`ChudPresence-Activities/` is a separate Git checkout ignored by this repository, not a submodule or part of the extension build. Its checked-out catalog contains **67Movies, Crunchyroll, Hulu, Kick, SoundCloud, Twitch, YouTube, and YouTube Music**. Discover fetches the official `ChudForks/ChudPresence-Activities` catalog from GitHub; editing the local checkout does not change Discover. Use Developer mode to test local packages.
 
 The extension bundles a copy of the YouTube Activity for the first install. Once user scripts are available, it installs automatically. Disabling it is preserved across bundled updates; removing it prevents automatic reinstallation. Other Activities are installed through the Library.
 

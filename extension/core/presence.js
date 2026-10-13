@@ -193,7 +193,7 @@ export function createPresenceIntent(track, nowMs = Date.now(), settings = {}) {
     timestamps: settings.showTimestamps === false ? null : timestamps(report.playback, nowMs),
     assets: largeImage ? {
       largeImage,
-      largeText: cleanText(art.largeText || report.media.album || report.media.title),
+      largeText: cleanText(art.largeText ?? (report.media.album || report.media.title)),
       ...(largeUrl ? { largeUrl } : {}),
       ...(smallImage ? { smallImage, smallText: cleanText(art.smallText || name) } : {}),
     } : null,
