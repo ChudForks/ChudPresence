@@ -9,7 +9,7 @@ This repository contains the **1.9.0 Manifest V3 Chromium development extension*
 | This repository | Chromium runtime, Activity Library, popup, permissions, settings, Discord authorization and publishing, schemas, tests, and local packaging |
 | [`ChudPresence-Activities/`](ChudPresence-Activities/README.md) | Official first-party packages, generated catalog, canonical V1 contract and SDK types, authoring CLI, shared artwork, and package validation |
 
-`ChudPresence-Activities/` is a separate Git checkout ignored by this repository, not a submodule or part of the extension build. Its checked-out catalog contains **67Movies, Crunchyroll, Hulu, Kick, SoundCloud, Twitch, YouTube, and YouTube Music**. Discover fetches the official `ChudForks/ChudPresence-Activities` catalog from GitHub; editing the local checkout does not change Discover. Use Developer mode to test local packages.
+`ChudPresence-Activities/` is a separate Git checkout ignored by this repository, not a submodule or part of the extension build. Its checked-out catalog contains **67Movies, Crunchyroll, Disney+, Hulu, Kick, SoundCloud, Twitch, YouTube, and YouTube Music**. Discover fetches the official `ChudForks/ChudPresence-Activities` catalog from GitHub; editing the local checkout does not change Discover. Use Developer mode to test local packages.
 
 The extension bundles a copy of the YouTube Activity for the first install. Once user scripts are available, it installs automatically. Disabling it is preserved across bundled updates; removing it prevents automatic reinstallation. Other Activities are installed through the Library.
 
@@ -24,6 +24,15 @@ The extension bundles a copy of the YouTube Activity for the first install. Once
 In **Developer**, enable developer tools to open **Activity logs**. Choose one Activity or all, then filter Activity logs, network requests, or playback/runtime snapshots and log levels. **Copy visible** copies the filtered text; **Select all** prepares it for manual copying. Focusing the text area holds its view during refresh, and **Pause updates** freezes a snapshot while new diagnostics continue collecting. **Clear history** resets the selected Activity's diagnostic history (or all history with All Activities selected) while playback, settings, and running requests continue. Installed cards offer **View logs** to open an Activity directly.
 
 To load a local package, enable developer tools and select its `metadata.json`, `activity.js`, and `icon.png` when declared, for example from `ChudPresence-Activities/activities/hulu/`. After editing or rebuilding a local package, select its files again and use **Load local Activity** to replace the installed source. **Reload Activity** reruns the stored package in its active documents. Website permissions are still required.
+
+Disney+ is available locally in `ChudPresence-Activities/activities/disney-plus/`.
+Load its three package files through Developer mode and approve Disney+ website
+access. It presents episodes like Hulu: episode title first, series second,
+season/episode artwork text, playback progress, and watch/service buttons.
+The package uses API v1's page bridge for Disney's custom player metadata and
+timeline and also supports ordinary video metadata on legacy `/video/` routes.
+Live Disney+ playback still needs browser verification; local tests use synthetic
+player fixtures.
 
 The popup lists installed Activities dynamically. Settings provides a global **Enable Activity Lab** switch and per-Activity enable, paused playback, status text, artwork, progress, and button preferences. Activity-defined settings are managed in the Library. Playing media takes priority over paused media, and the selected tab stays selected while eligible. Non-normal visibility produces no presence.
 

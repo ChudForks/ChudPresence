@@ -63,6 +63,7 @@ h1 { margin: 0 0 6px; font-size: clamp(30px, 4vw, 39px); line-height: 1.12; lett
 .activity-kick { --card-glow: rgba(71,212,91,.24); }
 .activity-67movies { --card-glow: rgba(83,146,255,.24); }
 .activity-hulu { --card-glow: rgba(28,231,131,.24); }
+.activity-disney-plus { --card-glow: rgba(2,214,232,.24); }
 .card-art { position: relative; display: flex; align-items: end; min-height: 136px; padding: 16px 18px; isolation: isolate; background: radial-gradient(circle at 72% 22%, var(--card-glow), transparent 49%), linear-gradient(125deg, #20263b, #111521 72%); border-bottom: 1px solid rgba(255,255,255,.055); }
 .card-art::after { position: absolute; z-index: -1; inset: 0; content: ""; background: linear-gradient(0deg, rgba(9,11,20,.35), transparent 70%); }
 .card-watermark { position: absolute; z-index: -1; top: -44px; right: -26px; width: 195px; height: 195px; object-fit: contain; opacity: .13; transform: rotate(-16deg); filter: saturate(.8); }
