@@ -1,5 +1,38 @@
 # Chromium Activity Lab verification
 
+## Stable 2.0.4 promotion (October 15, 2026)
+
+Release gates were rerun on Node.js 24.21.0: `npm ci`, `npm run check`, all
+**330 extension tests**, and `npm run build`. The independent V1 checkout passed
+contract/catalog validation, TypeScript checking, **96 tests**, and package
+version checks against `origin/main` (one changed package). The independent V2
+checkout passed SDK contract/catalog validation, TypeScript checking,
+**56 tests**, and its default version gate (zero changed packages). These
+checks do not publish the independent package commits or catalogs.
+
+`npm run test:v2-browser` passed on disposable **Edge 155.0.4283.45** using
+synthetic HTTPS responses and the real unpacked extension. This covers public
+DOM/shadow/JSON/media reads, credential filtering, guest isolation, scoped
+storage and network, reporting, CPU interruption, failed-guest restart
+prevention, explicit reload, disable cleanup, navigation grace and immediate
+tab-close clearing.
+
+The earlier `Closed navigation fixture retained workers` failure reproduced
+during this gate. Inspection showed the remaining CDP target had an empty URL,
+zero process ID and a missing parent target; `chrome.runtime.getContexts()`
+also confirmed that the offscreen document had closed. Attaching to the target
+produced no runtime evaluation response. The harness now excludes that stale
+target only when all those liveness indicators agree: empty URL, zero process,
+missing parent and no offscreen extension context. Workers with a live parent,
+a nonzero or unknown process, a URL, or an existing offscreen host still count.
+The complete smoke test then passed. No extension runtime change was needed.
+This resolves the optional smoke observation in the historical entries below.
+
+The stable tag retains extension version **2.0.4**. Browser evidence uses
+fixtures, not signed-in playback or Discord publishing; the remaining manual
+distribution checks and documented security limits remain applicable. See
+[RELEASE_NOTES.md](RELEASE_NOTES.md).
+
 ## Anikoto V1 navigation handoff (October 15, 2026)
 
 Extension **2.0.4** extends the existing V2 `presence.navigationGraceMs`

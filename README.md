@@ -1,8 +1,8 @@
 # ChudPresence Chromium Activity Lab
 
-This branch contains the **2.0.4 Manifest V3 Chromium development extension** with a programmable, sandboxed [Activity API v2](extension/ACTIVITY_API_V2.md) and continued trusted V1 support. V2 runs package JavaScript in an embedded QuickJS/WASM interpreter with declared, filtered page reads, scoped services, and resource limits. It installs playback Activities, selects current media, shows a local presence preview, and optionally publishes it to Discord.
+The stable line on `master` is the **2.0.4 Manifest V3 Chromium extension**, with a programmable, sandboxed [Activity API v2](extension/ACTIVITY_API_V2.md) and continued trusted V1 support. V2 runs package JavaScript in an embedded QuickJS/WASM interpreter with declared, filtered page reads, scoped services, and resource limits. It installs playback Activities, selects current media, shows a local presence preview, and optionally publishes it to Discord. See the [2.0.4 release notes](RELEASE_NOTES.md) for validation and remaining limits.
 
-The previous declarative V2 implementation is retained as a [historical reference](references/legacy-activity-api-v2/README.md), including all five Activities, their presence construction, tests, and migration findings. The replacement V2 uses ordinary JavaScript inside a restricted interpreter. Work is isolated on `codex/activity-api-v2-sandbox`; the V1 branch and the independent V1 Activities checkout are preserved.
+The previous declarative V2 implementation is retained as a [historical reference](references/legacy-activity-api-v2/README.md), including all five Activities, their presence construction, tests, and migration findings. Programmable V2 was developed on `codex/activity-api-v2-sandbox` and promoted into `master` with its commit history preserved. The V1 branch and the independent V1 Activities checkout are preserved. Future development branches start from `master`; stable releases use version tags.
 
 ## The repositories in this workspace
 

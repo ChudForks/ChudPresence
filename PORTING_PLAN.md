@@ -2,12 +2,13 @@
 
 ## Scope and current state
 
-The original plan was to create a separate Chromium MV3 lab, port Activity API V1 from the Firefox experiment, and validate Crunchyroll and YouTube Music with local presence intent before testing Discord. That runtime, Library, and packaging work is implemented in extension version **1.9.0**. The original ChudPresence Solo Chrome release remains the historical comparison described in [BASELINE.md](BASELINE.md).
+The original plan was to create a separate Chromium MV3 lab, port Activity API V1 from the Firefox experiment, and validate Crunchyroll and YouTube Music with local presence intent before testing Discord. That runtime, Library, and packaging work formed the 1.9.0 baseline. Extension **2.0.4** is the stable line on `master`, adding programmable sandboxed Activity API V2 alongside trusted V1. See [release notes](RELEASE_NOTES.md) for the promotion checks and known limits. The original ChudPresence Solo Chrome release remains the historical comparison described in [BASELINE.md](BASELINE.md).
 
-The workspace has two independent Git repositories. This lab owns extension behavior and copied contract outputs. `ChudPresence-Activities/` owns the canonical contract, authoring tools, and official first-party packages; its local checkout is ignored by the lab. Its current catalog contains 67Movies, Crunchyroll, Hulu, Kick, Twitch, YouTube, and YouTube Music. Discover reads the official remote catalog, while Developer mode loads local files.
+The workspace has three independent Git repositories. This lab owns extension behavior and copied contract outputs. `ChudPresence-Activities/` owns the canonical V1 contract, authoring tools, and official V1 packages; `ChudPresence-Activities-V2/` owns programmable V2 packages and SDK tooling. Both local package checkouts are ignored by the lab. Promoting the extension does not publish either package repository. Discover reads the official remote catalog, while Developer mode loads local files.
 
 ## Implemented platform decisions
 
+- Programmable V2 packages execute in dedicated QuickJS/WASM guests, with bounded declared page snapshots and scoped host services. Trusted V1 packages retain their existing runtime.
 - Chromium 135 minimum, with per-Activity `USER_SCRIPT` worlds and document-targeted `userScripts.execute()` for page inspection and reload.
 - Manifest V3 worker restoration on cold start and install/update, independent of Discord availability.
 - Install-time `userScripts` permission, optional declared website/network origins, and guidance for **Allow User Scripts** on Chrome 138 and newer.

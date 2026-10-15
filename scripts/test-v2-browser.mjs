@@ -264,8 +264,19 @@ try {
   await targets.send('Target.setDiscoverTargets', { discover: true, filter: [{}] });
   // Chromium may omit an unattached dedicated worker's URL. This fresh profile
   // and fixture create workers only through the extension's sandbox host.
-  const sandboxWorkers = async () => (await targets.send('Target.getTargets')).targetInfos
-    .filter(target => target.type === 'worker' && (!target.url || /activity-v2-worker\.js$/.test(target.url)));
+  const sandboxWorkers = async () => {
+    const all = (await targets.send('Target.getTargets')).targetInfos;
+    const workers = all.filter(target => target.type === 'worker' && (!target.url || /activity-v2-worker\.js$/.test(target.url)));
+    // Edge can retain an empty, zero-process target after its offscreen parent
+    // has closed. Count it until BOTH the parent target and the extension's
+    // offscreen context are gone; a live host or worker must still fail cleanup.
+    const parentIds = new Set(all.map(target => target.targetId));
+    const orphaned = target => target.pid === 0 && target.url === '' &&
+      target.parentId && !parentIds.has(target.parentId);
+    if (!workers.some(orphaned)) return workers;
+    const hosts = await worker.evaluate(() => chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] }));
+    return hosts.length ? workers : workers.filter(target => !orphaned(target));
+  };
   const originalWorkers = await until(sandboxWorkers, items => items.length === 1,
     'The activity did not start its dedicated extension worker');
   const reload = await send({ type: 'ACTIVITY_RELOAD', id });
