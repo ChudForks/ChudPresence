@@ -1,14 +1,21 @@
 const DOCUMENT_PATH = 'discord-cleanup.html';
-const DOCUMENT_URL = chrome.runtime.getURL(DOCUMENT_PATH);
+const DOCUMENT_URL = globalThis.chrome?.runtime?.getURL(DOCUMENT_PATH) || '';
 const PORT_NAME = 'discord-shutdown-cleanup';
 const RESPONSE_TIMEOUT_MS = 3_000;
 
 let cleanupPort = null;
-let creatingDocument = null;
+let documentOperation = Promise.resolve();
 let nextRequestId = 1;
 const connectionWaiters = new Set();
 const pendingResponses = new Map();
 const cleanupObservers = new Set();
+const activitySandboxLeases = new Set();
+
+function serializeDocumentOperation(operation) {
+  const result = documentOperation.then(operation);
+  documentOperation = result.catch(() => {});
+  return result;
+}
 
 export function onShutdownCleanup(listener) {
   cleanupObservers.add(listener);
@@ -22,7 +29,7 @@ function rejectPendingResponses(message) {
   pendingResponses.clear();
 }
 
-chrome.runtime.onConnect.addListener((port) => {
+globalThis.chrome?.runtime?.onConnect?.addListener((port) => {
   if (port.name !== PORT_NAME || port.sender?.url !== DOCUMENT_URL) return;
 
   cleanupPort = port;
@@ -59,18 +66,29 @@ async function hasCleanupDocument() {
   return contexts.length > 0;
 }
 
-async function ensureCleanupDocument() {
-  if (await hasCleanupDocument()) return;
-  if (!creatingDocument) {
-    creatingDocument = chrome.offscreen.createDocument({
+export function ensureCleanupDocument() {
+  return serializeDocumentOperation(async () => {
+    if (await hasCleanupDocument()) return;
+    await chrome.offscreen.createDocument({
       url: DOCUMENT_PATH,
-      reasons: ['BLOBS'],
-      justification: 'Keep a document-scoped deferred Discord cleanup request with a Blob request body.',
-    }).finally(() => {
-      creatingDocument = null;
+      reasons: ['BLOBS', 'WORKERS'],
+      justification: 'Keep deferred Discord cleanup with a Blob request body and run isolated Activity sandbox workers.',
     });
-  }
-  await creatingDocument;
+  });
+}
+
+export async function acquireActivitySandboxDocument(key) {
+  if (typeof key !== 'string' || !key || key.length > 256) throw new TypeError('Activity sandbox document lease requires a bounded string key.');
+  activitySandboxLeases.add(key);
+  try { await ensureCleanupDocument(); }
+  catch (error) { activitySandboxLeases.delete(key); throw error; }
+}
+
+export function releaseActivitySandboxDocument(key) {
+  // Keep the shared document alive after the last sandbox exits: a restarted
+  // service worker may not know whether its Discord shutdown fallback is armed.
+  // A normal Discord disarm can close an idle document safely.
+  return activitySandboxLeases.delete(key);
 }
 
 function waitForCleanupPort() {
@@ -125,6 +143,11 @@ export async function disarmShutdownCleanup() {
   try {
     await sendCommand({ type: 'DISARM' });
   } finally {
-    if (await hasCleanupDocument()) await chrome.offscreen.closeDocument();
+    await serializeDocumentOperation(async () => {
+      if (activitySandboxLeases.size || !await hasCleanupDocument()) return;
+      // Acquisition marks a lease before entering this queue. Check again
+      // after getContexts so no live worker is closed while that read awaits.
+      if (!activitySandboxLeases.size) await chrome.offscreen.closeDocument();
+    });
   }
 }

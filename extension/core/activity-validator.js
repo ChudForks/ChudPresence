@@ -1,4 +1,5 @@
 import { validateActivitySettingDefinitions } from './activity-settings.js';
+import { validateActivityV2PageAccess } from './activity-v2-page.js';
 import {
   ACTIVITY_API_VERSION,
   ACTIVITY_ID_PATTERN,
@@ -22,9 +23,9 @@ import {
   REPORT_VISIBILITY_VALUES,
 } from './activity-contract.generated.js';
 
-export const LATEST_ACTIVITY_API_VERSION = ACTIVITY_API_VERSION;
+export const LATEST_ACTIVITY_API_VERSION = 2;
 export { ACTIVITY_API_VERSION, MAX_ACTIVITY_ICON_BYTES, MAX_ACTIVITY_REPORT_BYTES, MAX_ACTIVITY_SOURCE_BYTES };
-export const SUPPORTED_ACTIVITY_API_VERSIONS = CONTRACT_SUPPORTED_ACTIVITY_API_VERSIONS;
+export const SUPPORTED_ACTIVITY_API_VERSIONS = Object.freeze([...CONTRACT_SUPPORTED_ACTIVITY_API_VERSIONS, 2]);
 // Keep the original export for callers that need to generate current metadata.
 const ACTIVITY_ID = new RegExp(ACTIVITY_ID_PATTERN);
 const ACTIVITY_KINDS = new Set(ACTIVITY_KIND_VALUES);
@@ -148,7 +149,9 @@ function protectedNetworkPattern(pattern) {
 export function validateActivityMetadata(metadata) {
   if (!isPlainObject(metadata)) fail('Activity metadata must be a JSON object.');
   for (const key of Object.keys(metadata)) {
-    if (!METADATA_FIELDS.has(key)) fail(`Activity metadata contains unsupported field ${key}.`);
+    if (!METADATA_FIELDS.has(key) && !(metadata.apiVersion === 2 && key === 'pageAccess')) {
+      fail(`Activity metadata contains unsupported field ${key}.`);
+    }
   }
   if (new TextEncoder().encode(JSON.stringify(metadata)).byteLength > MAX_ACTIVITY_METADATA_BYTES) {
     fail(`Activity metadata exceeds the ${Math.round(MAX_ACTIVITY_METADATA_BYTES / 1024)} KB size limit.`);
@@ -250,6 +253,7 @@ export function validateActivityMetadata(metadata) {
     fail('Activity frames must be top or all.');
   }
   const settings = validateActivitySettingDefinitions(metadata.settings ?? []);
+  const pageAccess = metadata.apiVersion === 2 ? validateActivityV2PageAccess(metadata.pageAccess) : undefined;
   return {
     ...metadata,
     id: metadata.id,
@@ -258,6 +262,7 @@ export function validateActivityMetadata(metadata) {
     matches: [...metadata.matches],
     network: [...network],
     settings,
+    ...(metadata.apiVersion === 2 ? { pageAccess } : {}),
     executionWorld: 'USER_SCRIPT',
     frames: metadata.frames || 'top',
   };
@@ -431,6 +436,7 @@ function normalizeActivityReportV1(report) {
 
 const REPORT_NORMALIZERS = new Map([
   [1, normalizeActivityReportV1],
+  [2, normalizeActivityReportV1],
 ]);
 
 export function normalizeActivityReport(report, apiVersion = LATEST_ACTIVITY_API_VERSION) {

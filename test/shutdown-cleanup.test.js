@@ -192,3 +192,106 @@ test('retains the offscreen fallback until a normal cleanup explicitly disarms i
   await context.cleanup.disarmShutdownCleanup();
   assert.equal(closes, 1);
 });
+
+async function createSharedDocumentHarness({ exists = true, closeGate, onClose = () => {}, createError = null } = {}) {
+  const coordinatorSource = (await readFile(new URL('../extension/discord/shutdown-cleanup.js', import.meta.url), 'utf8'))
+    .replace(/^export /gm, '');
+  const documentUrl = 'chrome-extension://test/discord-cleanup.html';
+  let onConnect;
+  let onMessage;
+  const creates = [];
+  let closes = 0;
+  const port = {
+    name: 'discord-shutdown-cleanup', sender: { url: documentUrl },
+    onMessage: { addListener(listener) { onMessage = listener; } },
+    onDisconnect: { addListener() {} },
+    postMessage(message) { onMessage({ replyTo: message.requestId, ok: true, armed: message.type === 'ARM', supported: true }); },
+  };
+  const context = vm.createContext({
+    chrome: {
+      runtime: {
+        getURL: () => documentUrl,
+        onConnect: { addListener(listener) { onConnect = listener; } },
+        async getContexts() { return exists ? [{}] : []; },
+      },
+      offscreen: {
+        async createDocument(options) {
+          creates.push(options);
+          if (createError) throw createError;
+          exists = true;
+          onConnect(port);
+        },
+        async closeDocument() {
+          closes++;
+          onClose();
+          await closeGate;
+          exists = false;
+        },
+      },
+    },
+    setTimeout, clearTimeout,
+  });
+  vm.runInContext(`${coordinatorSource}\nglobalThis.cleanup = { ensureCleanupDocument, acquireActivitySandboxDocument, releaseActivitySandboxDocument, armShutdownCleanup, disarmShutdownCleanup };`, context);
+  if (exists) onConnect(port);
+  return { cleanup: context.cleanup, creates, get closes() { return closes; }, get exists() { return exists; }, setExists(value) { exists = value; onConnect(port); } };
+}
+
+test('shared offscreen document requests worker support and coalesces concurrent sandbox acquisitions', async () => {
+  const harness = await createSharedDocumentHarness({ exists: false });
+  await Promise.all([
+    harness.cleanup.acquireActivitySandboxDocument('activity-a'),
+    harness.cleanup.acquireActivitySandboxDocument('activity-b'),
+    harness.cleanup.ensureCleanupDocument(),
+  ]);
+  assert.equal(harness.creates.length, 1);
+  assert.deepEqual(Array.from(harness.creates[0].reasons), ['BLOBS', 'WORKERS']);
+  assert.equal(harness.creates[0].url, 'discord-cleanup.html');
+  harness.cleanup.releaseActivitySandboxDocument('activity-a');
+  await harness.cleanup.disarmShutdownCleanup();
+  assert.equal(harness.closes, 0);
+  harness.cleanup.releaseActivitySandboxDocument('activity-b');
+  assert.equal(harness.closes, 0);
+  await harness.cleanup.disarmShutdownCleanup();
+  assert.equal(harness.closes, 1);
+});
+
+test('Discord disarm leaves active sandbox workers alive and the final release preserves unknown shutdown state', async () => {
+  const harness = await createSharedDocumentHarness();
+  await harness.cleanup.armShutdownCleanup('access', 'session');
+  await harness.cleanup.acquireActivitySandboxDocument('activity-a');
+  await harness.cleanup.disarmShutdownCleanup();
+  assert.equal(harness.closes, 0);
+  assert.equal(harness.cleanup.releaseActivitySandboxDocument('activity-a'), true);
+  assert.equal(harness.closes, 0);
+  await harness.cleanup.disarmShutdownCleanup();
+  assert.equal(harness.closes, 1);
+});
+
+test('a sandbox acquiring while an old document closes waits and obtains a replacement document', async () => {
+  let closeStarted;
+  const started = new Promise(resolve => { closeStarted = resolve; });
+  let finishClose;
+  const gate = new Promise(resolve => { finishClose = resolve; });
+  const harness = await createSharedDocumentHarness({ closeGate: gate, onClose: closeStarted });
+  const disarm = harness.cleanup.disarmShutdownCleanup();
+  await started;
+  const acquire = harness.cleanup.acquireActivitySandboxDocument('activity-a');
+  finishClose();
+  await Promise.all([disarm, acquire]);
+  assert.equal(harness.closes, 1);
+  assert.equal(harness.creates.length, 1);
+  assert.equal(harness.exists, true);
+  await harness.cleanup.disarmShutdownCleanup();
+  assert.equal(harness.closes, 1);
+});
+
+test('failed sandbox acquisition releases its lease so a normal disarm can close the document', async () => {
+  const harness = await createSharedDocumentHarness({ exists: false, createError: new Error('creation failed') });
+  await assert.rejects(harness.cleanup.acquireActivitySandboxDocument('activity-a'), /creation failed/);
+  harness.setExists(true);
+  await harness.cleanup.disarmShutdownCleanup();
+  assert.equal(harness.closes, 1);
+  for (const key of ['', null, 'x'.repeat(257)]) {
+    await assert.rejects(harness.cleanup.acquireActivitySandboxDocument(key), /lease/);
+  }
+});

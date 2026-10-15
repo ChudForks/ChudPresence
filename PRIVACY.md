@@ -1,5 +1,20 @@
 # Privacy — Chromium Activity Lab
 
+Activity API v2 runs package JavaScript inside an embedded QuickJS/WASM
+interpreter. Packages receive only their declared, filtered page snapshots and
+their scoped settings, storage, and service results. Browser/extension globals,
+cookies, local/session storage, input values, raw DOM, and arbitrary page-code
+execution are unavailable. Public text/attribute/JSON declarations are shown
+in the Library. URL queries/fragments and recognizable credentials are filtered;
+anonymous network calls omit browser credentials and reject redirects.
+
+Selected visible text can still be private, and unknown or disguised secrets
+cannot always be recognized. Packages can transmit data they are allowed to
+read using declared network endpoints or presence reports. Review those
+declarations. The following existing v1 behavior remains available for trusted
+packages and retains broader page access. See the
+[v2 guide](extension/ACTIVITY_API_V2.md) for the complete security boundary.
+
 This local development extension reads playback metadata on sites with installed Activities. It includes a YouTube Activity by default and declares YouTube host access in the manifest; you can disable or remove that Activity in the Library. A report can include the media title, creator or artist, playback state and position, artwork URL, and page, song, artist, or album links. Installed Activity code, icons, preferences, settings, and per-Activity storage are kept in local extension storage. Recent Activity reports, logs, and network diagnostics are held in the running worker and shown locally. Activity code runs in a Chromium user script world and does not receive Discord credentials or unrestricted extension APIs. V1 is intended for trusted first-party code with DOM and page-context access.
 
 The Activity Library downloads and caches the public catalog and package files from the `ChudForks/ChudPresence-Activities` GitHub repository when you refresh or install through Discover or Updates. It resolves a commit revision and verifies package hashes. Local file loading reads files you select; the nested Activities checkout is not uploaded by the lab. Requests through `ChudPresence.net.fetch()` are bounded HTTPS requests limited to declared network patterns; they omit cookies, reject redirects, and cannot target Discord endpoints. The 67Movies Activity uses this bridge to request title and artwork metadata from The Movie Database using the current page's movie or TV identifier. Hulu first fetches same-origin series and movie detail pages directly with cookies omitted and redirects allowed, then uses the restricted bridge if that request fails or lacks the needed metadata. Activity artwork can reference external HTTPS URLs, including shared images in the Activities repository; the popup and Discord may fetch those images.

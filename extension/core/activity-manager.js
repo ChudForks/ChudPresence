@@ -18,6 +18,8 @@ import {
   normalizeActivityPreferences,
 } from './activity-settings.js';
 import { compareActivityVersions } from './activity-repository.js';
+import { activityV2ScriptDefinition } from './activity-v2-runtime.js';
+import { ActivityV2HostClient } from './activity-v2-host-client.js';
 
 const STORAGE_KEY = 'installedActivities';
 const SCRIPT_ID_PREFIX = 'chudpresence-activity-';
@@ -66,8 +68,15 @@ function activityScriptId(id) {
   return `${SCRIPT_ID_PREFIX}${id}`;
 }
 
-function activityWorldId(id) {
-  return `${WORLD_ID_PREFIX}${id}`;
+function activityWorldId(id, apiVersion = 1) {
+  return `${WORLD_ID_PREFIX}${apiVersion === 2 ? 'v2.' : ''}${id}`;
+}
+
+function activityWorldConfiguration(definition, apiVersion) {
+  return {
+    worldId: definition.worldId, messaging: true,
+    ...(apiVersion === 2 ? { csp: "script-src 'self'; object-src 'none'; connect-src 'none'" } : {}),
+  };
 }
 
 function createActivityCapability() {
@@ -204,6 +213,7 @@ function pageExecutionCode(source, argsJson) {
 }
 
 function scriptDefinition(record, extensionVersion = '0.0.0') {
+  if (record.metadata.apiVersion === 2) return activityV2ScriptDefinition(record);
   const id = record.metadata.id;
   const code = [
     '(() => {',
@@ -727,7 +737,7 @@ function safeMatch(pattern, rawUrl) {
 }
 
 export class ActivityManager {
-  constructor({ api = extensionApi(), onReport = () => {}, onClear = () => {}, fetchImpl = globalThis.fetch } = {}) {
+  constructor({ api = extensionApi(), onReport = () => {}, onClear = () => {}, fetchImpl = globalThis.fetch, v2Host } = {}) {
     if (!api?.storage?.local) throw new Error('Extension storage API is required.');
     this.api = api;
     this.onReport = onReport;
@@ -745,6 +755,25 @@ export class ActivityManager {
     this.activityPorts = new Map();
     this.upgradeNotificationPorts = new WeakMap();
     this.operation = Promise.resolve();
+    this.v2Host = v2Host || new ActivityV2HostClient({ api,
+      onRequest: (session, operation, payload) => this.handleUserScriptMessage({
+        ...session.identity, requestId: `host-${Date.now()}`, operation, payload,
+      }, session.sender),
+      onFailure: async (session, message) => {
+        const record = (await this.load())[session.identity.activityId];
+        if (!record || record.capability !== session.identity.capability) return;
+        this.recordActivityError(session.identity.activityId, session.sender, 'sandbox_error', message);
+        this.executeActivityLog(session.identity.activityId, record, session.sender, {
+          level: 'error', args: ['V2 sandbox stopped', message],
+        });
+        for (const [port, context] of this.activityPorts.get(session.identity.activityId) || []) {
+          if (context.tabId !== session.sender.tab.id || context.documentId !== session.sender.documentId) continue;
+          try { port.postMessage({ type: 'CHUDPRESENCE_ACTIVITY_ABORT', activityId: session.identity.activityId,
+            activityVersion: session.identity.activityVersion, reason: 'sandbox-error' }); } catch {}
+        }
+        await this.handleUserScriptMessage({ ...session.identity, requestId: 'host-clear', operation: 'presence.clear', payload: {} }, session.sender);
+      },
+    });
   }
 
   serialize(operation) {
@@ -796,6 +825,7 @@ export class ActivityManager {
         compatibilityStatus,
         matches: Array.isArray(record.metadata.matches) ? [...record.metadata.matches] : [],
         network: Array.isArray(record.metadata.network) ? [...record.metadata.network] : [],
+        ...(record.metadata.apiVersion === 2 ? { pageAccess: structuredClone(record.metadata.pageAccess || {}) } : {}),
         settings: Array.isArray(record.metadata.settings) ? structuredClone(record.metadata.settings) : [],
         ...(record.metadata.settingsUi ? { settingsUi: structuredClone(record.metadata.settingsUi) } : {}),
         settingValues: normalizeActivitySettings(record.metadata.settings || [], record.settingValues),
@@ -1026,18 +1056,14 @@ export class ActivityManager {
   async handleUserScriptConnect(port) {
     const sender = port?.sender;
     const worldId = sender?.userScriptWorldId;
-    const portMatch = /^chudpresence-activity-v1:([a-z0-9][a-z0-9-]{1,63}):([^:]+):([a-f0-9]{64})$/.exec(port?.name || '');
+    const portMatch = /^chudpresence-activity-v([12]):([a-z0-9][a-z0-9-]{1,63}):([^:]+):([a-f0-9]{64})$/.exec(port?.name || '');
     if (!portMatch) return false;
-    const [, portActivityId, activityVersion, capability] = portMatch;
+    const [, apiVersion, portActivityId, activityVersion, capability] = portMatch;
     let id = portActivityId;
-    if (typeof worldId === 'string') {
-      if (!worldId.startsWith(WORLD_ID_PREFIX)) return false;
-      id = worldId.slice(WORLD_ID_PREFIX.length);
-      if (id !== portActivityId) return false;
-    }
     const record = (await this.load())[id];
     if (!record || record.metadata.id !== id || !record.enabled ||
-        activityVersion !== record.metadata.version || capability !== record.capability ||
+        (typeof worldId === 'string' && worldId !== activityWorldId(id, record.metadata.apiVersion)) ||
+        Number(apiVersion) !== record.metadata.apiVersion || activityVersion !== record.metadata.version || capability !== record.capability ||
         typeof sender?.tab?.id !== 'number' || !Number.isInteger(sender.frameId) ||
         typeof sender.documentId !== 'string' || !sender.documentId ||
         !record.metadata.matches.some((pattern) => safeMatch(pattern, sender.url || '')) ||
@@ -1058,6 +1084,8 @@ export class ActivityManager {
 
   disconnectActivityPort(id, port) {
     const ports = this.activityPorts.get(id);
+    const context = ports?.get(port);
+    if (context) this.v2Host.stopContext(id, context.tabId, context.documentId);
     if (ports) {
       ports.delete(port);
       if (!ports.size) this.activityPorts.delete(id);
@@ -1094,10 +1122,7 @@ export class ActivityManager {
     }
 
     const definition = scriptDefinition(record, extensionVersion(this.api));
-    await this.api.userScripts.configureWorld({
-      worldId: definition.worldId,
-      messaging: true,
-    });
+    await this.api.userScripts.configureWorld(activityWorldConfiguration(definition, record.metadata.apiVersion));
     const registered = await this.installedScripts();
     if (registered.some((script) => script.id === definition.id)) {
       await this.api.userScripts.update([definition]);
@@ -1271,7 +1296,7 @@ export class ActivityManager {
           ...(record.metadata.frames === 'all' ? { allFrames: true } : {}),
         },
         world: 'USER_SCRIPT',
-        worldId: activityWorldId(record.metadata.id),
+        worldId: activityWorldId(record.metadata.id, record.metadata.apiVersion),
         injectImmediately: true,
       });
       const result = Array.isArray(results) ? results[0] : null;
@@ -1321,14 +1346,14 @@ export class ActivityManager {
         js: [{ code: 'try { delete globalThis.__chudpresenceActivityGeneration; } catch {}' }],
         target: { tabId: context.tabId, documentIds: [context.documentId] },
         world: 'USER_SCRIPT',
-        worldId: activityWorldId(id),
+        worldId: activityWorldId(id, record.metadata.apiVersion),
         injectImmediately: true,
       }).catch(() => {});
       const results = await this.api.userScripts.execute({
         js: scriptDefinition(record, extensionVersion(this.api)).js,
         target: { tabId: context.tabId, documentIds: [context.documentId] },
         world: 'USER_SCRIPT',
-        worldId: activityWorldId(id),
+        worldId: activityWorldId(id, record.metadata.apiVersion),
         injectImmediately: true,
       });
       const result = Array.isArray(results) ? results[0] : null;
@@ -1553,7 +1578,7 @@ export class ActivityManager {
       try {
         const exists = registered.some((script) => script.id === activityScriptId(record.metadata.id));
         const definition = scriptDefinition(record, extensionVersion(this.api));
-        await this.api.userScripts.configureWorld({ worldId: definition.worldId, messaging: true });
+        await this.api.userScripts.configureWorld(activityWorldConfiguration(definition, record.metadata.apiVersion));
         if (exists) await this.api.userScripts.update([definition]);
         else await this.api.userScripts.register([definition]);
         delete record.error;
@@ -1777,6 +1802,7 @@ export class ActivityManager {
           headers,
           ...(body === undefined ? {} : { body }),
           credentials: 'omit',
+          ...(record.metadata.apiVersion === 2 ? { cache: 'no-store' } : {}),
           redirect: 'error',
           referrerPolicy: 'no-referrer',
           signal: controller.signal,
@@ -1927,6 +1953,7 @@ export class ActivityManager {
   }
 
   async notifyActivityTeardown(id, reason) {
+    this.v2Host.stopActivity(id);
     const record = this.records?.[id];
     let notified = 0;
     for (const [port, context] of this.activityPorts.get(id) || []) {
@@ -1958,21 +1985,24 @@ export class ActivityManager {
     const records = await this.load();
     const worldId = sender?.userScriptWorldId;
     let id = message?.activityId;
-    if (typeof worldId === 'string') {
-      if (!worldId.startsWith(WORLD_ID_PREFIX)) return false;
-      const worldActivityId = worldId.slice(WORLD_ID_PREFIX.length);
-      if (worldActivityId !== id) return false;
-      id = worldActivityId;
-    }
     if (!isActivityId(id) || !ACTIVITY_CAPABILITY_PATTERN.test(message?.capability || '')) return false;
     const record = records[id];
     const tabId = sender?.tab?.id;
     if (!record || record.metadata.id !== id || !record.enabled ||
+        (typeof worldId === 'string' && worldId !== activityWorldId(id, record.metadata.apiVersion)) ||
         !ACTIVITY_CAPABILITY_PATTERN.test(record.capability || '') || message.capability !== record.capability ||
         typeof tabId !== 'number') return false;
     if (structured && message.activityVersion !== record.metadata.version) return false;
-    if (!record.metadata.matches.some((pattern) => safeMatch(pattern, sender.url || ''))) return false;
-    if ((record.metadata.excludeMatches || []).some((pattern) => safeMatch(pattern, sender.url || ''))) return false;
+    // V2 has no legacy request path or arbitrary main-world execution escape.
+    // Enforce this here even if a future guest bridge exposes more operations.
+    if (record.metadata.apiVersion === 2 && (!structured || message.operation === 'page.execute')) {
+      return { ok: false, requestId: message.requestId || '', error: {
+        code: 'unsupported_operation', message: 'V2 does not permit arbitrary page-context execution.',
+      } };
+    }
+    const scopedV2Clear = structured && record.metadata.apiVersion === 2 && message.operation === 'presence.clear';
+    if (!scopedV2Clear && !record.metadata.matches.some((pattern) => safeMatch(pattern, sender.url || ''))) return false;
+    if (!scopedV2Clear && (record.metadata.excludeMatches || []).some((pattern) => safeMatch(pattern, sender.url || ''))) return false;
 
     const requestId = structured ? message.requestId : '';
     const respond = (ok, data = null, code = '', description = '', name = '') => {
@@ -2000,7 +2030,9 @@ export class ActivityManager {
       if (message.apiVersion !== record.metadata.apiVersion) {
         return respond(false, null, 'unsupported_api_version', 'The Activity API version does not match its package metadata.');
       }
-      if (message.operation === 'presence.report') {
+      if (message.operation === 'sandbox.update' && record.metadata.apiVersion === 2) {
+        operation = 'sandbox.update';
+      } else if (message.operation === 'presence.report') {
         operation = 'report';
         reportValue = message.payload?.report;
       } else if (message.operation === 'presence.clear') {
@@ -2035,7 +2067,7 @@ export class ActivityManager {
       return false;
     }
 
-    if (!this.allowReport(id, tabId)) {
+    if (!(record.metadata.apiVersion === 2 && operation === 'clear') && !this.allowReport(id, tabId)) {
       return respond(false, null, 'rate_limited', 'The Activity has sent too many requests.');
     }
 
@@ -2108,6 +2140,20 @@ export class ActivityManager {
       return respond(false, null, 'unsupported_context', 'This browser did not provide a document-bound Activity context.');
     }
 
+    if (operation === 'sandbox.update') {
+      if (!Number.isInteger(sender.frameId)) return respond(false, null, 'unsupported_context', 'A document-bound frame is required.');
+      try {
+        const data = await this.v2Host.update({
+          identity: {
+            type: 'CHUDPRESENCE_ACTIVITY_REQUEST', activityId: id, activityVersion: record.metadata.version,
+            apiVersion: 2, capability: record.capability,
+          },
+          sender: { ...sender, tab: { id: tabId } }, source: record.code, snapshot: message.payload?.snapshot,
+        });
+        return respond(true, data);
+      } catch (error) { return respond(false, null, 'sandbox_error', String(error.message || 'Could not update Activity sandbox.').slice(0, 240)); }
+    }
+
     if (operation === 'lifecycle.upgradeComplete' || operation === 'lifecycle.upgradeError') {
       try {
         const result = await this.completeActivityUpgrade(id, record, sender, operation, lifecycleRequest);
@@ -2169,6 +2215,7 @@ export class ActivityManager {
         seen.retiredDocumentIds?.has(messageDocumentId) ||
         (seen.documentId && messageDocumentId && seen.documentId !== messageDocumentId) ||
         (!seen.documentId && !messageDocumentId && seen.senderUrl && sender.url && seen.senderUrl !== sender.url);
+      if (record.metadata.apiVersion === 2 && message.payload?.closing === true) this.v2Host.stopContext(id, tabId, messageDocumentId);
       if (isLateClear) return respond(true, { cleared: false, stale: true });
       this.recordActivityClear(id, sender);
       frames.delete(frameId);
@@ -2360,6 +2407,7 @@ export class ActivityManager {
 
   async invalidateTab(tabId, { retireDocuments = true } = {}) {
     if (!Number.isInteger(tabId)) return 0;
+    if (retireDocuments) this.v2Host.stopTab(tabId);
     const callbacks = [];
     let invalidated = 0;
     for (const [id, tabs] of this.lastSeen) {

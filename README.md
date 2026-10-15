@@ -1,8 +1,8 @@
 # ChudPresence Chromium Activity Lab
 
-This repository contains the **1.9.0 Manifest V3 Chromium development extension** for Activity API V1. It installs playback Activities, selects the current media, shows a local presence preview, and optionally publishes it to Discord. It is a separate development build from the original ChudPresence Solo Chrome release.
+This branch contains the **2.0.0 Manifest V3 Chromium development extension** with a programmable, sandboxed [Activity API v2](extension/ACTIVITY_API_V2.md) and continued trusted V1 support. V2 runs package JavaScript in an embedded QuickJS/WASM interpreter with declared, filtered page reads, scoped services, and resource limits. It installs playback Activities, selects current media, shows a local presence preview, and optionally publishes it to Discord.
 
-The previous declarative V2 implementation is retained as a [historical reference](references/legacy-activity-api-v2/README.md), including all five Activities, their presence construction, tests, and migration findings. The active extension has returned to the last baseline before V2 was introduced. A replacement V2 has not been implemented.
+The previous declarative V2 implementation is retained as a [historical reference](references/legacy-activity-api-v2/README.md), including all five Activities, their presence construction, tests, and migration findings. The replacement V2 uses ordinary JavaScript inside a restricted interpreter. Work is isolated on `codex/activity-api-v2-sandbox`; the V1 branch and the independent V1 Activities checkout are preserved.
 
 ## The repositories in this workspace
 
@@ -55,9 +55,10 @@ Activity-authored song, artist, and album links can make Discord text and artwor
 
 ## Development gates
 
-Use Node.js 20 or newer as declared by both repositories; the latest checks used Node.js 24.21.0. The extension has no npm dependencies to install. Run from this repository:
+Use Node.js 20 or newer as declared by both repositories; the latest checks used Node.js 24.21.0. Development uses pinned build dependencies; the extension ships the interpreter locally. Run from this repository:
 
 ```sh
+npm ci
 npm run check
 npm test
 npm run build
@@ -79,6 +80,6 @@ The version-bump gate accepts `--base=<ref>` and otherwise uses GitHub event/bas
 
 `npm run check` validates the extension manifest and JavaScript, local contract outputs, and bundled YouTube files. When the Activities checkout is present, it also checks its generated contract and catalog hashes, compares canonical contract copies, and verifies bundled YouTube parity. Changes to the canonical contract belong in the Activities repository. Run `node tools/generate-api-contract.mjs` there to regenerate its outputs; in this workspace layout it also refreshes the lab's contract, schemas, and runtime constants. For standalone checkouts, synchronize those copies separately.
 
-`npm run build` replaces `dist/` with `ChudPresence-Chromium-Activity-Lab-1.9.0/` and its zip. A system `tar` executable is required for packaging. On Windows, `build.bat` runs the same three extension gates. Load `extension/` directly while debugging. `dist/`, `baseline/`, `browser-profiles/`, and the Activities checkout are ignored here. Building performs no publication.
+`npm run build` replaces `dist/` with `ChudPresence-Chromium-Activity-Lab-2.0.0/` and its zip. A system `tar` executable is required for packaging. On Windows, `build.bat` runs the same three extension gates. Load `extension/` directly while debugging. `dist/`, `baseline/`, `browser-profiles/`, and the Activities checkout are ignored here. Building performs no publication.
 
 See [architecture](ARCHITECTURE.md), [the Activity API guide](extension/ACTIVITY_API.md), [verification results](TESTING.md), [privacy details](PRIVACY.md), [the original baseline](BASELINE.md), and [porting status and remaining checks](PORTING_PLAN.md). Activity API V1 is intended for trusted first-party packages.

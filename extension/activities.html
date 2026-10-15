@@ -78,6 +78,9 @@
           <div class="notice" id="developer-notice" role="status"></div>
         </div>
         <div class="developer-guide">
+          <h3>Activity API v2</h3>
+          <p>Use <code>apiVersion: 2</code> for programmable Activities that run inside a sandbox. Declare the page fields you need in <code>pageAccess</code>, then combine their snapshots with JavaScript in <code>ChudPresence.onUpdate()</code>. V2 supports public DOM and JSON reads, open shadow roots, media state, selected query parameters, scoped storage, and declared network requests.</p>
+          <a href="ACTIVITY_API_V2.md" target="_blank" rel="noopener">Read the sandboxed Activity API v2 guide</a>
           <h3>Activity API v1</h3>
           <p>Scripts run in an isolated Chromium <code>USER_SCRIPT</code> world. Chrome 138 and newer may require <strong>Allow User Scripts</strong> on this extension’s details page. An Activity may report from the top page or, when configured, matching embedded frames. Use Activity logs above to filter, copy, and clear diagnostic history. Installed cards also offer View logs and Reload Activity.</p>
           <pre><code>ChudPresence.report({

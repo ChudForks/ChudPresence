@@ -1,5 +1,35 @@
 # Chromium Activity Lab architecture
 
+## Activity API v2 sandbox
+
+Version 2.0.0 adds programmable v2 while preserving v1's runtime and canonical
+contract. `activity-v2-runtime.js` registers a small page broker and
+a trusted bootstrap in `chudpresence.activity.v2.<id>`, separate from v1's world.
+The background authenticates page snapshots and relays them over a private port
+to `activity-v2-host.js` in the shared offscreen document. That host creates
+dedicated extension workers running the locally bundled QuickJS/WASM engine.
+Package source goes only to its worker as data supplied to QuickJS, never to
+the website world or native browser evaluation. Website CSP cannot block it.
+Each guest has its own WebAssembly instance/allocator, heap and stack quotas,
+interrupt deadline, bounded promise work, and bounded async JSON requests.
+Only compiled WASM code is cached across guests. The bridge never returns a
+browser reference, host function, or ownership capability to guest code.
+
+`activity-v2-page.js` validates fixed metadata declarations and collects bounded
+snapshots of public DOM text/attributes, selected JSON paths, native media, and
+optional origin/path. It filters sensitive controls and containers, credential
+keys/patterns, URL credentials/query/fragments, and selector predicates that
+could probe secret attribute values. Package callbacks run on host-controlled
+polling and may combine data with ordinary JavaScript and existing scoped
+storage/settings/network services. No v2 operation executes arbitrary code in
+the page world; the manager rejects `page.execute` for v2 independently of the
+guest bridge. Lifecycle teardown disposes the interpreter on disable/removal,
+reload, document exit, route scope loss, or execution failure.
+
+See [the v2 contract and threat model](extension/ACTIVITY_API_V2.md) for exact
+capabilities, resource limits, migration guidance, and limits of data filtering.
+The broader native Activity wrapper described below applies to v1.
+
 ## Repository boundaries
 
 The lab owns the Chromium extension and its tests. The separate, locally nested `ChudPresence-Activities/` Git checkout owns the official packages, catalog, canonical Activity API V1 contract, generated schemas and SDK types, CLI, and shared artwork. It is ignored by the lab and is not included by the build. The lab carries contract copies under `schemas/` and `extension/core/activity-contract.generated.js`; `npm run check` validates them and compares them with the Activities checkout when present. It also checks the bundled YouTube package against that checkout.

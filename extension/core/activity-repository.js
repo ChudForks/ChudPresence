@@ -9,6 +9,7 @@ import {
 } from './activity-validator.js';
 import { ACTIVITY_KIND_VALUES } from './activity-contract.generated.js';
 import { MAX_ACTIVITY_ICON_BYTES, MAX_ACTIVITY_METADATA_BYTES } from './activity-contract.generated.js';
+import { validateActivityV2PageAccess } from './activity-v2-page.js';
 
 export const ACTIVITY_REPOSITORY = Object.freeze({
   owner: 'ChudForks',
@@ -87,6 +88,10 @@ export function validateCatalog(value) {
     }
     if (entry.minExtensionVersion !== undefined && !isSemanticVersion(entry.minExtensionVersion)) {
       throw new Error(`The catalog entry for ${entry.id} has an invalid minimum extension version.`);
+    }
+    if (entry.apiVersion === 2) {
+      try { validateActivityV2PageAccess(entry.pageAccess); }
+      catch { throw new Error(`The catalog entry for ${entry.id} has invalid page access declarations.`); }
     }
     if (entry.network !== undefined &&
         (!Array.isArray(entry.network) || entry.network.length > 32 ||
@@ -294,7 +299,7 @@ export async function downloadActivity(activityId, catalog) {
   const comparableFields = ['name', 'description', 'version', 'apiVersion', 'minExtensionVersion', 'matches',
     'category', 'aliases', 'tags', 'excludeMatches', 'author', 'contributors',
     'serviceUrl', 'homepage', 'repository', 'presence', 'defaultMediaKind',
-    'frames', 'network', 'settings', 'settingsUi'];
+    'frames', 'network', 'settings', 'settingsUi', 'pageAccess'];
   const mismatch = comparableFields.find((field) =>
     canonicalJson(packageMetadata[field]) !== canonicalJson(entry[field]));
   if (!isSupportedActivityApiVersion(metadata.apiVersion) || metadata.id !== entry.id ||

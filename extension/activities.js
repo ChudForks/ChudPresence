@@ -239,7 +239,7 @@ function cardIcon(id, icon) {
   return repositoryCardIcon(id, icon);
 }
 
-function baseCard({ id, name, description, category, version, matches, icon = '', local = false }) {
+function baseCard({ id, name, description, category, version, matches, apiVersion = 1, pageAccess, icon = '', local = false }) {
   const card = element('article', 'activity-card');
   if (/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id)) card.classList.add(`activity-${id}`);
   const art = element('div', 'card-art');
@@ -276,8 +276,22 @@ function baseCard({ id, name, description, category, version, matches, icon = ''
   content.append(top, element('p', 'card-description', description || 'No description provided.'));
   const meta = element('div', 'card-meta');
   meta.append(element('span', '', formatVersion(version || '0.0.0')));
+  meta.append(element('span', 'card-api', apiVersion === 2 ? 'API v2 · Sandboxed' : 'API v1 · Trusted code'));
   meta.append(element('span', 'card-sites', hostSummary(matches)));
   content.append(meta);
+  if (apiVersion === 2) {
+    const access = element('details', 'card-page-access');
+    access.append(element('summary', '', 'Declared page access'));
+    const descriptions = [];
+    if (pageAccess?.url) descriptions.push('Page origin and path');
+    if (pageAccess?.media) descriptions.push('Media playback and visibility');
+    if (pageAccess?.queryParameters?.length) descriptions.push(`Query parameters: ${pageAccess.queryParameters.join(', ')}`);
+    for (const [name, capture] of Object.entries(pageAccess?.selectors || {})) {
+      descriptions.push(`${name}: ${capture.read} from ${capture.selector}`);
+    }
+    access.append(element('p', '', descriptions.length ? descriptions.join(' · ') : 'No page reads'));
+    content.append(access);
+  }
   card.append(art, content);
   return { card, actions: element('div', 'card-actions') };
 }

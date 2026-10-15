@@ -230,16 +230,24 @@ test('rejects catalog display or permission fields that disagree with verified m
 test('refuses to install a catalog package requiring an unsupported API version', async () => {
   const fixture = createFixture();
   const metadata = JSON.parse(fixture.metadata);
-  metadata.apiVersion = 2;
+  metadata.apiVersion = 999;
   fixture.metadata = JSON.stringify(metadata);
   fixture.files.set('metadata.json', fixture.metadata);
   stubRepositoryFetch(fixture);
   try {
     await assert.rejects(downloadActivity('youtube-music', {
       revision: 'a'.repeat(40),
-      activities: [await entryFor(fixture, { apiVersion: 2 })],
-    }), /Activity API version 2 is not supported/);
+      activities: [await entryFor(fixture, { apiVersion: 999 })],
+    }), /Activity API version 999 is not supported/);
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test('v2 catalog page declarations are checked before asking for website permissions', async () => {
+  const fixture = createFixture();
+  const entry = await entryFor(fixture, { apiVersion: 2, pageAccess: {
+    selectors: { secret: { selector: 'input[value^="x"]', read: 'text' } },
+  } });
+  assert.throws(() => validateCatalog({ schemaVersion: 1, activities: [entry] }), /invalid page access declarations/);
 });

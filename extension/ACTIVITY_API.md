@@ -1,5 +1,9 @@
 # ChudPresence Activity API v1
 
+The separate [Activity API v2](ACTIVITY_API_V2.md) adds a programmable sandbox
+with declared page snapshots. This guide continues to describe V1's trusted
+runtime; existing V1 packages are supported without conversion.
+
 Activity API V1 is a trusted, first-party runtime for official ChudPresence
 Activities. V1 grants broad website-observation capabilities to support rich
 service integrations, including DOM access, page-context inspection, and

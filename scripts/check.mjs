@@ -18,6 +18,7 @@ async function javascriptFiles(directory) {
 }
 
 JSON.parse(await fs.readFile(path.join(extension, 'manifest.json'), 'utf8'));
+execFileSync(process.execPath, ['scripts/generate-v2-contract.mjs', '--check'], { cwd: root, stdio: 'inherit' });
 for (const file of await javascriptFiles(extension)) {
   execFileSync(process.execPath, ['--check', file], { stdio: 'inherit' });
 }

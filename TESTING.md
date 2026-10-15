@@ -1,5 +1,50 @@
 # Chromium Activity Lab verification
 
+## Programmable Activity API v2 sandbox (October 14, 2026)
+
+Implemented on `codex/activity-api-v2-sandbox`, based on the unchanged V1 branch
+`codex/activity-api-v1-conformance` at `2e3ec6b`. The independent V1 Activities
+checkout remains clean at `dd642c2`. All nine V1 packages, their canonical
+contract, and bundled YouTube remain unchanged; V1 is still supported by the
+existing runtime. This is a separate programmable V2, independent of the archived
+declarative implementation.
+
+`npm run check`, all **295 tests**, and the example's strict TypeScript check
+passed. `npm run build` produced the version 2.0.0 extension folder and ZIP.
+The full dependency audit reports no known vulnerabilities. New tests
+cover guest constructor/prototype escapes, unavailable browser/network/storage
+globals, JSON-only service marshalling, private result handles, CPU/promise/heap/
+stack/WASM memory limits, native VM faults, worker watchdog and stale-ack races,
+fixed selector grammar and attribute probes, sensitive DOM filtering, selected
+JSON paths, public open-shadow/media reads, explicit query parameters, scoped
+storage, host authentication, lifecycle/SPA clearing, failure tombstones, and
+shared offscreen-document races. Contract tests preserve the exact V1 report
+schema and verify actual sandbox limits against V2's published contract.
+
+`npm run test:v2-browser` passed on **Microsoft Edge 155.0.4283.45** in a disposable
+profile using synthetic HTTPS fixtures. The website's strict CSP forbids WASM;
+the trusted page broker runs there while the interpreter runs in a dedicated
+extension worker hosted by the existing offscreen document. Tests verified
+public DOM/shadow/JSON/media access, absence of seeded cookie/local-storage/input/
+hidden/script/JSON credential values, no extension ownership capability or
+Discord storage sentinel in the guest, scoped storage, denied undeclared network
+and credential selectors, accepted presence reports, CPU interruption, reload,
+and worker removal on disable. A failing async guest remained stopped across
+poll intervals, and explicit reload restarted it once before stopping again.
+
+Browser testing exposed and resolved two real integration problems that Node
+tests could not catch: page CSP prevented in-page WASM compilation, and extension
+service workers disallow dynamic imports. The final implementation runs WASM
+outside the website and uses static service-worker imports. The downloaded
+Playwright Chromium build could not launch on this Windows host; the test used
+the installed Edge executable. It did not use an existing browser profile,
+real account credentials, live service playback, or Discord publishing. It does
+not establish compatibility with every supported Chromium version or website.
+
+Selected page data remains subject to the filtering limitations documented in
+[the v2 threat model](extension/ACTIVITY_API_V2.md). Unknown secrets disguised as
+ordinary selected text or URL paths cannot be reliably recognized.
+
 ## Library scroll-jump regression (October 13, 2026)
 
 The three-second Library poll could move a scrolled page upward after a settings area had been scrolled. Installed rendering emptied the live grid, attached its first card, and restored that card's settings scroll before attaching the remaining rows. This forced browser layout while the document was temporarily shorter. Hovering a lower card exposed the timing but was not the cause.
