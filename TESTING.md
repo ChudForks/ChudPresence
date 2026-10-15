@@ -1,5 +1,64 @@
 # Chromium Activity Lab verification
 
+## Anikoto V1 navigation handoff (October 15, 2026)
+
+Extension **2.0.4** extends the existing V2 `presence.navigationGraceMs`
+metadata option to V1. Anikoto **1.0.3** opts into four seconds and replaces
+SPA reports directly without an intermediate clear. A confirmed in-scope
+top-document transition stops the outgoing runtime while retaining its last
+presence until a replacement report or the fixed deadline. The V1 generation
+marker prevents reinjection into the outgoing document; a back/forward-cache
+restore restarts the runtime. Missing, canceled, excluded and out-of-scope
+navigation hints receive no grace. Both API schemas, authoring tools and the
+V2 SDK snapshot reflect the shared option.
+
+Validation passed: **330 extension tests**, **96 V1 repository tests** and
+**56 V2 repository tests**. The disposable Edge browser fixture used the real
+Anikoto package and extension, clicked an internal link with its response
+delayed, and repeatedly observed a nonempty final presence while the outgoing
+document was retired. The replacement document reported successfully. A form
+submission with a stalled response cleared at the four-second deadline and
+recovered after the new document loaded. Leaving the declared site or closing
+the tab during handoff cleared promptly. Existing playback, focus, logo,
+display-preference and real V2 guest checks also passed without page errors.
+These use synthetic site responses and do not exercise Discord publication.
+
+Reload/update to **2.0.4** and reimport Anikoto **1.0.3** to apply the fix.
+The broader V2 worker-target cleanup observation recorded below remains a
+separate unresolved optional smoke result; this change does not alter the
+V2 sandbox worker lifecycle.
+
+## Shared V1/V2 browsing presentation (October 15, 2026)
+
+Extension **2.0.3** adds opt-in `display.statusDisplayOverride` and
+`display.hideState` to both report APIs, their schemas, validators, TypeScript
+types, and the independent V2 SDK snapshot. Existing reports retain the saved
+status preference and existing state fallbacks. Anikoto **1.0.2** requires
+2.0.3 and uses these options only while browsing, with the site's public PNG
+favicon as its large image. Playback retains its series/episode preference.
+
+Validation passed: extension check and **327 tests**, V1 package checks and
+**94 tests**, V2 SDK/type/catalog checks and **56 tests**. A simultaneous run
+first hit the existing 50 ms QuickJS execution limit; the complete extension
+suite passed when run on its own. The isolated browser fixture accepted the
+real Anikoto V1 package, verified the formatted logo URL, application-name
+status despite a saved media-line preference, omitted state, playback
+preference restoration, focus/visibility behavior and existing player checks.
+It also installed a real V2 QuickJS guest and accepted/formatted both shared
+controls with the saved preference intact. No page errors occurred.
+
+The broader optional `scripts/test-v2-browser.mjs` check remains unresolved:
+two runs timed out at `Closed navigation fixture retained workers` after the
+navigation tab closed. Presence had cleared and the tab/frame registry was
+empty, but one worker target remained. The same check passed against HEAD's
+runtime in a temporary baseline checkout. No worker-lifecycle code changed in
+this update; this separate cleanup observation is not counted as a pass.
+
+The logo endpoint returned HTTP 200 and the expected valid PNG bytes. These
+checks do not verify Discord's external image proxy or live profile rendering.
+Reload/update the extension to **2.0.3**, then reimport Anikoto's three package
+files to apply the change in an existing browser profile.
+
 ## Instagram Saved and generic fallback (October 15, 2026)
 
 Instagram **2.3.0** adds a generic `Saved` state for `/<username>/saved/`, with

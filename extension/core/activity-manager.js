@@ -216,7 +216,7 @@ function scriptDefinition(record, extensionVersion = '0.0.0') {
   if (record.metadata.apiVersion === 2) return activityV2ScriptDefinition(record);
   const id = record.metadata.id;
   const code = [
-    '(() => {',
+    '(function __runActivityV1() {',
     "  'use strict';",
     // Imperative execute() targets frames directly and does not apply the
     // registered script's URL filters. Check them before starting any runtime.
@@ -250,6 +250,24 @@ function scriptDefinition(record, extensionVersion = '0.0.0') {
     '  const __lifecycleTimers = new Map();',
     '  const __lifecycleCleanups = new Set();',
     '  let __lifecycleEnded = false;',
+    `  const __navigationGraceMs = ${record.metadata.presence?.navigationGraceMs || 0};`,
+    '  let __documentNavigation = null;',
+    '  const __hasDocumentNavigation = () => Boolean(__documentNavigation && !__documentNavigation.signal?.aborted);',
+    '  const __onDocumentNavigate = (event) => {',
+    '    const url = event.destination?.url;',
+    '    __documentNavigation = __navigationGraceMs > 0 && window === window.top && !event.defaultPrevented &&',
+    '      event.destination?.sameDocument === false && typeof url === "string" && url.length <= 8192 &&',
+    `      ${JSON.stringify(record.metadata.matches)}.some(pattern => __matchesUrl(pattern, url)) &&`,
+    `      !${JSON.stringify(record.metadata.excludeMatches || [])}.some(pattern => __matchesUrl(pattern, url))`,
+    '      ? { url, signal: event.signal } : null;',
+    '  };',
+    '  const __onDocumentNavigationError = () => { __documentNavigation = null; };',
+    '  const __onDocumentPageShow = (event) => {',
+    '    window.removeEventListener("pageshow", __onDocumentPageShow);',
+    '    if (!event.persisted || globalThis.__chudpresenceActivityGeneration !== __activityIdentity.capability) return;',
+    '    delete globalThis.__chudpresenceActivityGeneration;',
+    '    __runActivityV1();',
+    '  };',
     '  const __runCleanup = (callback) => { try { callback(); } catch {} };',
     '  const __endLifecycle = (reason = "activity-ended") => {',
     '    if (__lifecycleEnded) return false;',
@@ -263,19 +281,32 @@ function scriptDefinition(record, extensionVersion = '0.0.0') {
     '    __lifecycleCleanups.clear();',
     '    window.removeEventListener("pagehide", __onDocumentEnd);',
     '    window.removeEventListener("beforeunload", __onDocumentEnd);',
+    '    window.navigation?.removeEventListener?.("navigate", __onDocumentNavigate);',
+    '    window.navigation?.removeEventListener?.("navigateerror", __onDocumentNavigationError);',
     '    try { __runtimePort?.disconnect?.(); } catch {}',
-    '    try { delete globalThis.__chudpresenceActivityGeneration; } catch {}',
+    // Keep the ended generation marked while a new document is pending so
+    // tabs.onUpdated cannot reinject into the outgoing document. A cached
+    // document restarts only when pageshow confirms that it was restored.
+    '    if (reason === "document-destroyed" && __navigationGraceMs > 0) {',
+    '      window.addEventListener("pageshow", __onDocumentPageShow, { once: true });',
+    '    } else { try { delete globalThis.__chudpresenceActivityGeneration; } catch {} }',
     '    return true;',
     '  };',
     '  const __onDocumentEnd = () => {',
     '    if (__lifecycleEnded) return;',
-    '    try { void __request("presence.clear", { closing: true }).catch(() => {}); } catch {}',
+    '    try { void __request("presence.clear", { closing: true,',
+    '      ...(__hasDocumentNavigation() ? { navigationUrl: __documentNavigation.url } : {}),',
+    '    }).catch(() => {}); } catch {}',
     '    __endLifecycle("document-destroyed");',
     '  };',
     '  const __matchesActivity = (message) => message?.type === "CHUDPRESENCE_ACTIVITY_ABORT" &&',
     '    message.activityId === __activityIdentity.activityId && message.activityVersion === __activityIdentity.activityVersion;',
     '  window.addEventListener("pagehide", __onDocumentEnd, { once: true });',
     '  window.addEventListener("beforeunload", __onDocumentEnd, { once: true });',
+    '  if (__navigationGraceMs > 0 && window === window.top) {',
+    '    window.navigation?.addEventListener?.("navigate", __onDocumentNavigate);',
+    '    window.navigation?.addEventListener?.("navigateerror", __onDocumentNavigationError);',
+    '  }',
     '  const __upgradeListeners = new Set();',
     '  const __lifecycle = Object.freeze({',
     '    signal: __lifecycleController.signal,',
@@ -619,7 +650,12 @@ function scriptDefinition(record, extensionVersion = '0.0.0') {
     '  const __emptyNamespace = Object.freeze({});',
     '  const ChudPresence = Object.freeze({',
     '    report(report) { __lastReport = report; return __request("presence.report", { report }); },',
-    '    clear() { __lastReport = null; return __request("presence.clear"); },',
+    '    clear() {',
+    // Focus/visibility changes during a known navigation can precede unload.
+    // Let the native closing clear perform the bounded handoff instead.
+    '      if (!__lifecycleEnded && __hasDocumentNavigation()) return Promise.resolve({ ok: true, data: { cleared: false, stale: false } });',
+    '      __lastReport = null; return __request("presence.clear");',
+    '    },',
     '    runtime: Object.freeze({',
     '      activityId: __activityIdentity.activityId,',
     '      activityVersion: __activityIdentity.activityVersion,',
@@ -2224,7 +2260,7 @@ export class ActivityManager {
       if (!tabs.size) this.lastSeen.delete(id);
       if (structured && message.payload?.closing === true) {
         const navigationUrl = message.payload?.navigationUrl;
-        const navigationGraceMs = record.metadata.apiVersion === 2 && frameId === 0 &&
+        const navigationGraceMs = frameId === 0 &&
           typeof navigationUrl === 'string' && navigationUrl.length <= 8192 &&
           record.metadata.matches.some(pattern => safeMatch(pattern, navigationUrl)) &&
           !(record.metadata.excludeMatches || []).some(pattern => safeMatch(pattern, navigationUrl))

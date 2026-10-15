@@ -72,6 +72,26 @@ installed package into a document that is already running that package does not
 run the script again. Use `navigation.onChange()` for later route changes in
 that document. Reload and a new install capability run the script again.
 
+Starting in extension **2.0.4**, V1 packages can opt into the navigation handoff
+also available to V2 packages since 2.0.1:
+
+```json
+{ "presence": { "kind": "video", "navigationGraceMs": 4000 } }
+```
+
+`navigationGraceMs` is an integer from 0 to 5000 ms, defaulting to zero.
+Declare `minExtensionVersion: "2.0.4"` when using it in V1. A native Navigation
+API event must identify a new top-level document within `matches` and outside
+`excludeMatches`. The outgoing script stops at document exit, while its last
+presence remains for at most the configured duration. A replacement report
+updates it directly and cancels the deadline; repeated exit signals cannot
+extend it. Tab closure, out-of-scope navigation and Activity teardown still
+clear immediately. Missing or aborted navigation hints keep ordinary clears.
+Focus/visibility clears during a pending valid handoff defer to document exit.
+Restoring an opted-in document from the back/forward cache restarts its runtime.
+For SPA route changes, publish the replacement report directly instead of
+clearing before reporting.
+
 ## Runtime and reports
 
 The current V1 runtime exposes `ChudPresence.report()` and
@@ -129,6 +149,23 @@ the displayed artist URL as `stateUrl`, and the album URL as `largeUrl`.
 These links are independent of the two-button limit and must be HTTPS URLs.
 Set `artwork.largeText` to an empty string to omit the artwork text (the third
 line in Discord's music card). Omitting the field uses album or title text.
+
+Starting in extension **2.0.3**, both API V1 and V2 reports support two opt-in
+display controls. `display.statusDisplayOverride` accepts `name`, `details`, or
+`state` and overrides the saved status-line selection for that report only.
+Omit it on playback reports to resume the user's saved series/episode choice.
+`display.hideState: true` omits the second text line, its link, fallback app or
+creator text, and Live/Paused markers. Omit it or use `false` for existing
+behavior. Neither option changes saved preferences or artwork/button settings.
+Packages using these options should declare `minExtensionVersion: '2.0.3'`.
+
+```js
+ChudPresence.report({
+  kind: 'generic', media: { title: 'Browsing Example' },
+  display: { details: 'Browsing Example', statusDisplayOverride: 'name', hideState: true },
+  artwork: { large: 'https://example.com/logo.png', largeText: 'Example' },
+});
+```
 
 `ChudPresence.runtime` provides the registered `activityId`, package
 `activityVersion`, `apiVersion`, `extensionVersion`, a frame descriptor, and

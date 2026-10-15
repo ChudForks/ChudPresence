@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import test from 'node:test';
-import { validateActivityMetadata, validateActivitySource } from '../extension/core/activity-validator.js';
+import { normalizeActivityReport, validateActivityMetadata, validateActivitySource } from '../extension/core/activity-validator.js';
+import { createPresenceIntent } from '../extension/core/presence.js';
+import { buildHeadlessActivity } from '../extension/discord/activity-builder.js';
 await import('../extension/core/activity-v2-engine.generated.js');
 
 test('v2 contract adds metadata and page presentation without changing v1 fields', async () => {
@@ -25,6 +27,37 @@ test('v2 contract adds metadata and page presentation without changing v1 fields
   for (const [key, value] of Object.entries(globalThis.ChudPresenceV2Engine.ACTIVITY_V2_SANDBOX_LIMITS)) {
     assert.equal(v2.limits[key], value, `V2 contract limit ${key} differs from the actual sandbox`);
   }
+});
+
+test('V2 guests can report shared display controls through normalization and Discord formatting', async () => {
+  const activities = [];
+  const errors = [];
+  const sandbox = await globalThis.ChudPresenceV2Engine.createActivityV2Sandbox({
+    source: `ChudPresence.onUpdate(async () => {
+      await ChudPresence.report({
+        kind: 'generic', media: { title: 'Browsing Example' },
+        display: { name: 'Example', details: 'Browsing Example', statusDisplayOverride: 'name', hideState: true }
+      });
+    });`,
+    async request(operation, payload) {
+      assert.equal(operation, 'presence.report');
+      const report = normalizeActivityReport(payload.report, 2);
+      const intent = createPresenceIntent({ ...report, activityId: 'example', activityName: 'Example' }, 100_000, { statusDisplay: 'track' });
+      activities.push(buildHeadlessActivity(intent, '1549066134706323548'));
+      return { accepted: true };
+    },
+    onError(error) { errors.push(error); },
+  });
+  try {
+    sandbox.update({ page: {}, reads: {}, media: [] });
+    for (let i = 0; i < 24; i++) await Promise.resolve();
+    assert.deepEqual(errors, []);
+    assert.equal(activities.length, 1);
+    assert.equal(activities[0].name, 'Example');
+    assert.equal(activities[0].details, 'Browsing Example');
+    assert.equal(activities[0].status_display_type, 0);
+    assert.equal(Object.hasOwn(activities[0], 'state'), false);
+  } finally { sandbox.dispose(); }
 });
 
 test('the documented v2 example runs against the actual guest API and v1 report format', async () => {

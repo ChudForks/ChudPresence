@@ -41,7 +41,12 @@ export interface ActivityReport {
   media: { title: string; subtitle?: string; artist?: string; album?: string; series?: string;
     season?: number; episode?: number; creator?: string; channel?: string; category?: string; game?: string; playlist?: string };
   playback?: { state?: 'playing' | 'paused' | 'stopped'; position?: number; duration?: number; rate?: number; live?: boolean; elapsed?: boolean };
-  display?: { name?: string; details?: string; state?: string; detailsUrl?: string; stateUrl?: string; statusDisplay?: 'name' | 'details' | 'state' };
+  display?: { name?: string; details?: string; state?: string; detailsUrl?: string; stateUrl?: string;
+    statusDisplay?: 'name' | 'details' | 'state';
+    /** Override the saved status-line preference for this report (extension 2.0.3+). */
+    statusDisplayOverride?: 'name' | 'details' | 'state';
+    /** Omit the second text line and its fallbacks/markers (extension 2.0.3+). */
+    hideState?: boolean };
   artwork?: { large?: string; largeUrl?: string; small?: string; largeText?: string; smallText?: string };
   buttons?: { label: string; url: string }[];
   visibility?: 'normal' | 'idle' | 'private' | 'ad';

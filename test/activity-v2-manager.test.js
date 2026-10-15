@@ -116,21 +116,26 @@ test('tab removal rejects queued V2 updates/reports so they cannot recreate a wo
 });
 
 test('only opted-in, in-scope top-document navigation receives the metadata grace', async () => {
-  for (const [options, expected] of [
-    [{}, 4000], [{ destination: 'https://other.example/' }, 0],
-    [{ destination: 'https://example.com/private', exclude: true }, 0],
-    [{ destination: 'javascript:alert(1)' }, 0], [{ frameId: 3 }, 0], [{ optIn: false }, 0],
-  ]) {
-    const { manager, calls, records } = fixture();
-    records[metadata.id].metadata.presence = options.optIn === false ? {} : { navigationGraceMs: 4000 };
-    if (options.exclude) records[metadata.id].metadata.excludeMatches = ['https://example.com/private*'];
-    const context = { ...sender, frameId: options.frameId || 0 };
-    await manager.handleUserScriptMessage(message('presence.report', { report: { kind: 'generic', media: { title: 'query' } } }), context);
-    const result = await manager.handleUserScriptMessage(message('presence.clear', {
-      closing: true, navigationUrl: options.destination || 'https://example.com/search?q=new', navigationGraceMs: 999999,
-    }), context);
-    assert.equal(result.ok, true);
-    assert.equal(calls.find(([kind]) => kind === 'clear')[1][4].navigationGraceMs || 0, expected);
+  for (const apiVersion of [1, 2]) {
+    for (const [options, expected] of [
+      [{}, 4000], [{ destination: 'https://other.example/' }, 0],
+      [{ destination: 'https://example.com/private', exclude: true }, 0],
+      [{ destination: 'javascript:alert(1)' }, 0], [{ frameId: 3 }, 0], [{ optIn: false }, 0],
+    ]) {
+      const { manager, calls, records } = fixture();
+      records[metadata.id].metadata.apiVersion = apiVersion;
+      records[metadata.id].metadata.presence = options.optIn === false ? {} : { navigationGraceMs: 4000 };
+      if (options.exclude) records[metadata.id].metadata.excludeMatches = ['https://example.com/private*'];
+      const context = { ...sender, frameId: options.frameId || 0,
+        userScriptWorldId: `chudpresence.activity.${apiVersion === 2 ? 'v2.' : ''}${metadata.id}` };
+      const request = (operation, payload) => ({ ...message(operation, payload), apiVersion });
+      await manager.handleUserScriptMessage(request('presence.report', { report: { kind: 'generic', media: { title: 'query' } } }), context);
+      const result = await manager.handleUserScriptMessage(request('presence.clear', {
+        closing: true, navigationUrl: options.destination || 'https://example.com/search?q=new', navigationGraceMs: 999999,
+      }), context);
+      assert.equal(result.ok, true);
+      assert.equal(calls.find(([kind]) => kind === 'clear')[1][4].navigationGraceMs || 0, expected);
+    }
   }
 });
 

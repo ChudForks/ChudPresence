@@ -231,13 +231,33 @@ await ChudPresence.report({
 
 Use guest `Date.now()` and a closure to measure the current page session, resetting
 it when query, mode, readiness or visibility changes. These fields add no page or
-browser authority. V1 retains its original report contract.
+browser authority. Mode names and elapsed timers remain V2-only.
+
+Extension **2.0.3** also adds shared V1/V2 presentation controls:
+`display.statusDisplayOverride: 'name'` forces the compact status to show the
+application/mode name even when the saved preference selects a media line.
+The other accepted values are `details` and `state`. `display.hideState: true`
+omits the second text line and its link, including fallback text and Live/Paused
+markers. Both options are per-report and opt-in; omitting them on a subsequent
+playback report restores normal formatting and the saved preference.
+They do not alter saved settings or bypass artwork/button preferences.
+Packages using them should require `minExtensionVersion: '2.0.3'`.
+
+```js
+await ChudPresence.report({
+  kind: 'generic', media: { title: 'Browsing Example' },
+  display: { details: 'Browsing Example', statusDisplayOverride: 'name', hideState: true },
+  artwork: { large: 'https://example.com/logo.png', largeText: 'Example' },
+});
+```
 
 ### Presence during navigation
 
 Starting in extension 2.0.1, a V2 package may declare
 `"presence": { "kind": "generic", "navigationGraceMs": 4000 }` in metadata.
 The optional grace is an integer from **0 to 5000 ms**, defaulting to zero.
+The same metadata option is available to V1 packages starting in extension
+**2.0.4**, with the same bounds and destination checks.
 The extension retains the outgoing presence for at most that duration when a
 top-level link, form submission or other Navigation API event identifies a new
 document within the package's declared matches (and outside its exclusions).

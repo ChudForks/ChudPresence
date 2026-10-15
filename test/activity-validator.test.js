@@ -104,15 +104,16 @@ test('accepts optional status labels and rejects unsupported or empty UI metadat
   }
 });
 
-test('navigation grace is a bounded v2 metadata option and v1 retains its original presence declaration', () => {
-  for (const navigationGraceMs of [0, 1500, 4000, 5000]) {
-    const value = validateActivityMetadata(metadata({ apiVersion: 2, presence: { kind: 'generic', navigationGraceMs } }));
-    assert.equal(value.presence.navigationGraceMs, navigationGraceMs);
+test('navigation grace is a bounded opt-in metadata option for V1 and V2', () => {
+  for (const apiVersion of [1, 2]) {
+    for (const navigationGraceMs of [0, 1500, 4000, 5000]) {
+      const value = validateActivityMetadata(metadata({ apiVersion, presence: { kind: 'generic', navigationGraceMs } }));
+      assert.equal(value.presence.navigationGraceMs, navigationGraceMs);
+    }
+    for (const navigationGraceMs of [-1, 5001, 1.5, '4000', null]) {
+      assert.throws(() => validateActivityMetadata(metadata({ apiVersion, presence: { navigationGraceMs } })), /navigationGraceMs/);
+    }
   }
-  for (const navigationGraceMs of [-1, 5001, 1.5, '4000', null]) {
-    assert.throws(() => validateActivityMetadata(metadata({ apiVersion: 2, presence: { navigationGraceMs } })), /navigationGraceMs/);
-  }
-  assert.throws(() => validateActivityMetadata(metadata({ apiVersion: 1, presence: { navigationGraceMs: 4000 } })), /presence/);
 });
 
 test('enforces Activity source size and non-empty content', () => {
@@ -188,6 +189,27 @@ test('rejects unsafe URLs, invalid kinds, visibility values, and undeclared repo
   assert.throws(() => normalizeActivityReport({
     kind: 'movie', media: { title: 'Title' }, visibility: 'hidden',
   }), /visibility must be/);
+});
+
+test('both APIs validate opt-in status overrides and second-line suppression', () => {
+  for (const apiVersion of [1, 2]) {
+    const report = { kind: 'generic', media: { title: 'Browsing' } };
+    for (const statusDisplayOverride of ['name', 'state', 'details']) {
+      const normalized = normalizeActivityReport({ ...report, display: { statusDisplayOverride, hideState: true } }, apiVersion);
+      assert.equal(normalized.display.statusDisplayOverride, statusDisplayOverride);
+      assert.equal(normalized.display.hideState, true);
+    }
+    const unchanged = normalizeActivityReport(report, apiVersion);
+    assert.equal(Object.hasOwn(unchanged.display, 'statusDisplayOverride'), false);
+    assert.equal(Object.hasOwn(unchanged.display, 'hideState'), false);
+    assert.equal(normalizeActivityReport({ ...report, display: { hideState: false } }, apiVersion).display.hideState, false);
+    for (const statusDisplayOverride of ['', 'app', true, null, 1]) {
+      assert.throws(() => normalizeActivityReport({ ...report, display: { statusDisplayOverride } }, apiVersion), /statusDisplayOverride/);
+    }
+    for (const hideState of ['', 'false', null, 0, 1, {}]) {
+      assert.throws(() => normalizeActivityReport({ ...report, display: { hideState } }, apiVersion), /hideState/);
+    }
+  }
 });
 
 test('enforces nested field limits, playback values, and the two-button maximum', () => {

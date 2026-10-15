@@ -145,6 +145,7 @@ function timestamps(playback, nowMs) {
 }
 
 function statusDisplayType(report, settings) {
+  if (report.display.statusDisplayOverride) return report.display.statusDisplayOverride;
   const selected = report.display.statusFields?.[settings.statusDisplay];
   if (selected) return selected;
   if (settings.statusDisplay === 'app') return 'name';
@@ -175,6 +176,7 @@ export function createPresenceIntent(track, nowMs = Date.now(), settings = {}) {
   const smallImage = safeUrl(art?.small);
   const detailsUrl = safeUrl(report.display.detailsUrl);
   const stateUrl = safeUrl(report.display.stateUrl);
+  const hideState = report.display.hideState === true;
   const buttons = settings.showButtons === false
     ? []
     : (report.buttons || []).map((button) => {
@@ -189,8 +191,8 @@ export function createPresenceIntent(track, nowMs = Date.now(), settings = {}) {
     ...(type === 'streaming' && streamUrl ? { streamUrl } : {}),
     details,
     ...(detailsUrl ? { detailsUrl } : {}),
-    state: markers.length ? `${cleanText(state, MAX_TEXT_LENGTH - markers.join(' • ').length - 3)} • ${markers.join(' • ')}` : state,
-    ...(stateUrl ? { stateUrl } : {}),
+    state: hideState ? '' : markers.length ? `${cleanText(state, MAX_TEXT_LENGTH - markers.join(' • ').length - 3)} • ${markers.join(' • ')}` : state,
+    ...(!hideState && stateUrl ? { stateUrl } : {}),
     statusDisplayType: statusDisplayType(report, settings),
     timestamps: settings.showTimestamps === false ? null : timestamps(report.playback, nowMs),
     assets: largeImage ? {

@@ -229,7 +229,7 @@ export function validateActivityMetadata(metadata) {
   }
   if (metadata.presence !== undefined &&
       (!isPlainObject(metadata.presence) || Object.keys(metadata.presence).some((key) =>
-        key !== 'kind' && !(metadata.apiVersion === 2 && key === 'navigationGraceMs')) ||
+        key !== 'kind' && key !== 'navigationGraceMs') ||
        (metadata.presence.kind !== undefined && !PRESENCE_KINDS.has(metadata.presence.kind)))) {
     fail('Activity presence contains an unsupported field or kind.');
   }
@@ -379,6 +379,16 @@ function normalizeDisplay(value, kind, media) {
   display.statusDisplay = value.statusDisplay === undefined ? 'details' : value.statusDisplay;
   if (typeof display.statusDisplay !== 'string' || !REPORT_STATUS_DISPLAY.has(display.statusDisplay)) {
     fail('display.statusDisplay must be name, details, or state.');
+  }
+  if (value.statusDisplayOverride !== undefined) {
+    if (typeof value.statusDisplayOverride !== 'string' || !REPORT_STATUS_DISPLAY.has(value.statusDisplayOverride)) {
+      fail('display.statusDisplayOverride must be name, details, or state.');
+    }
+    display.statusDisplayOverride = value.statusDisplayOverride;
+  }
+  if (value.hideState !== undefined) {
+    if (typeof value.hideState !== 'boolean') fail('display.hideState must be a boolean.');
+    display.hideState = value.hideState;
   }
   return display;
 }

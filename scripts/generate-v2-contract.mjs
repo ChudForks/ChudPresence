@@ -9,10 +9,6 @@ const metadataSchema = structuredClone(v1.metadataSchema);
 metadataSchema.$id = 'https://chudpresence.local/schemas/activity-v2.schema.json';
 metadataSchema.title = 'ChudPresence sandboxed Activity API v2 metadata';
 metadataSchema.properties.apiVersion = { const: 2 };
-metadataSchema.properties.presence.properties.navigationGraceMs = {
-  type: 'integer', minimum: 0, maximum: 5000, default: 0,
-  description: 'Bounded presence retention during navigation within this Activity. Tab close and explicit teardown bypass it.',
-};
 metadataSchema.properties.pageAccess = {
   type: 'object', additionalProperties: false,
   properties: {

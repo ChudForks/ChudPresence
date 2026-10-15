@@ -4,6 +4,53 @@ import { createPresenceIntent } from '../extension/core/presence.js';
 import { normalizeActivityReport } from '../extension/core/activity-validator.js';
 import { buildHeadlessActivity } from '../extension/discord/activity-builder.js';
 
+test('V1 and V2 browsing can override the saved status line and omit all second-line fallbacks', () => {
+  for (const apiVersion of [1, 2]) {
+    const report = normalizeActivityReport({
+      kind: 'generic', media: { title: 'Browsing Anikoto', creator: 'Fallback creator' },
+      display: { details: 'Browsing Anikoto', state: '', statusDisplayOverride: 'name', hideState: true,
+        stateUrl: 'https://example.com/creator' },
+      artwork: { large: 'https://anikototv.to/AnikotoTheme/assets/images/favicon.png', largeText: 'Anikoto' },
+    }, apiVersion);
+    for (const statusDisplay of ['app', 'artist', 'track']) {
+      const settings = { statusDisplay };
+      const intent = createPresenceIntent({ ...report, activityName: 'Anikoto', activityId: 'anikoto' }, 100_000, settings);
+      assert.equal(intent.statusDisplayType, 'name');
+      assert.equal(intent.name, 'Anikoto');
+      assert.equal(intent.details, 'Browsing Anikoto');
+      assert.equal(intent.state, '');
+      assert.equal(intent.stateUrl, undefined);
+      assert.equal(intent.assets.largeImage, report.artwork.large);
+      assert.deepEqual(settings, { statusDisplay });
+      const activity = buildHeadlessActivity(intent, '1549066134706323548');
+      assert.equal(activity.status_display_type, 0);
+      assert.equal(Object.hasOwn(activity, 'state'), false);
+      assert.equal(Object.hasOwn(activity, 'state_url'), false);
+    }
+  }
+});
+
+test('display controls are opt-in and a later playback report restores saved preferences', () => {
+  for (const apiVersion of [1, 2]) {
+    const playback = normalizeActivityReport({
+      kind: 'episode', media: { title: 'Episode 9', series: 'Yani Neko' },
+      display: { details: 'Yani Neko', state: 'Episode 9' },
+      playback: { state: 'paused', position: 120, duration: 1422 },
+    }, apiVersion);
+    const intent = createPresenceIntent({ ...playback, activityName: 'Anikoto' }, 100_000, { statusDisplay: 'track' });
+    assert.equal(intent.statusDisplayType, 'details');
+    assert.equal(intent.state, 'Episode 9 • Paused');
+    const explicitFalse = createPresenceIntent({ ...playback, display: { ...playback.display, hideState: false } }, 100_000);
+    assert.equal(explicitFalse.state, 'Episode 9 • Paused');
+    const hidden = createPresenceIntent({ ...playback, display: { ...playback.display, hideState: true } }, 100_000);
+    assert.equal(hidden.state, '');
+    for (const statusDisplayOverride of ['name', 'state', 'details']) {
+      const overridden = createPresenceIntent({ ...playback, display: { ...playback.display, statusDisplayOverride } }, 100_000, { statusDisplay: 'app' });
+      assert.equal(overridden.statusDisplayType, statusDisplayOverride);
+    }
+  }
+});
+
 test('generic v2 pages preserve mode names, empty state and elapsed time through Discord formatting', () => {
   const report = normalizeActivityReport({
     kind: 'generic', media: { title: 'test' },
