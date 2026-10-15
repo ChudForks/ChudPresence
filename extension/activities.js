@@ -45,6 +45,37 @@ let developerSnapshot = null;
 let developerActivityOptions = '';
 let libraryRefreshRevision = 0;
 const installedSettingsScroll = new Map();
+const disclosureStates = new WeakMap();
+let discoverRenderKey = '';
+let installedRenderKey = '';
+let updatesRenderKey = '';
+
+function replaceLibraryCards(target, cards) {
+  const states = disclosureStates.get(target) || new Map();
+  const active = document.activeElement;
+  const focusedCard = active?.matches?.('summary') && active.closest('.activity-card');
+  const focusedId = focusedCard && [...target.children].includes(focusedCard) ? focusedCard.dataset.activityId : null;
+  for (const card of target.children) {
+    const disclosure = card.querySelector('.card-page-access');
+    if (disclosure) states.set(card.dataset.activityId, {
+      open: disclosure.open,
+      scrollTop: disclosure.querySelector('.page-access-list')?.scrollTop || 0,
+    });
+  }
+  for (const card of cards) {
+    const disclosure = card.querySelector('.card-page-access');
+    if (disclosure && states.has(card.dataset.activityId)) disclosure.open = states.get(card.dataset.activityId).open;
+  }
+  disclosureStates.set(target, states);
+  // Restore disclosures before attaching the complete grid so layout never sees
+  // a temporarily collapsed page that could clamp the reader's scroll position.
+  target.replaceChildren(...cards);
+  for (const card of cards) {
+    const list = card.querySelector('.page-access-list');
+    if (list) list.scrollTop = states.get(card.dataset.activityId)?.scrollTop || 0;
+  }
+  if (focusedId) cards.find((card) => card.dataset.activityId === focusedId)?.querySelector('summary')?.focus({ preventScroll: true });
+}
 
 function rememberInstalledSettingsScroll() {
   if (document.getElementById('installed-view').hidden) return;
@@ -241,6 +272,7 @@ function cardIcon(id, icon) {
 
 function baseCard({ id, name, description, category, version, matches, apiVersion = 1, pageAccess, icon = '', local = false }) {
   const card = element('article', 'activity-card');
+  card.dataset.activityId = id;
   if (/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id)) card.classList.add(`activity-${id}`);
   const art = element('div', 'card-art');
   const artIcon = cardIcon(id, icon);
@@ -295,7 +327,13 @@ function baseCard({ id, name, description, category, version, matches, apiVersio
         descriptions.push(`${name}.${field}: ${capture.read}${capture.attribute ? ` ${capture.attribute}` : ''} from ${capture.selector}`);
       }
     }
-    access.append(element('p', '', descriptions.length ? descriptions.join(' · ') : 'No page reads'));
+    if (descriptions.length) {
+      const list = element('ul', 'page-access-list');
+      for (const description of descriptions) list.append(element('li', '', description));
+      access.append(list);
+    } else {
+      access.append(element('p', '', 'No page reads'));
+    }
     content.append(access);
   }
   card.append(art, content);
@@ -313,16 +351,22 @@ function renderDiscover() {
       .some((value) => String(value || '').toLowerCase().includes(query));
     return matchesQuery && (category === 'all' || entry.category === category);
   });
+  const installedMap = installedById();
+  const renderKey = JSON.stringify([Boolean(catalog), filtered.map((entry) => {
+    const record = installedMap.get(entry.id);
+    return [entry, Boolean(record), record?.version, record?.source?.type, compatibilityMessage(entry)];
+  })]);
+  if (renderKey === discoverRenderKey) return;
+  discoverRenderKey = renderKey;
   if (!filtered.length) {
     const empty = element('div');
     appendEmpty(empty, catalog ? 'No matching Activities' : 'Catalog not connected', catalog
       ? 'Try a different search or category.'
       : 'Use Refresh catalog to connect to ChudForks/ChudPresence-Activities.');
-    discoverList.replaceChildren(...empty.children);
+    replaceLibraryCards(discoverList, [...empty.children]);
     return;
   }
 
-  const installedMap = installedById();
   for (const entry of filtered) {
     const { card, actions } = baseCard(entry);
     const record = installedMap.get(entry.id);
@@ -344,7 +388,7 @@ function renderDiscover() {
     card.append(actions);
     cards.push(card);
   }
-  discoverList.replaceChildren(...cards);
+  replaceLibraryCards(discoverList, cards);
 }
 
 function renderActivitySettings(record, card) {
@@ -389,7 +433,8 @@ function renderActivitySettings(record, card) {
     }
     control.setAttribute('aria-label', setting.label);
     control.addEventListener('change', async () => {
-      const previous = record.settingValues?.[setting.id] ?? setting.default;
+      const currentRecord = installed.find(({ id }) => id === record.id) || record;
+      const previous = currentRecord.settingValues?.[setting.id] ?? setting.default;
       const value = setting.type === 'boolean'
         ? control.checked
         : setting.type === 'number' || setting.type === 'range'
@@ -400,7 +445,8 @@ function renderActivitySettings(record, card) {
       let saved = false;
       try {
         const result = await extensionMessage({ type: 'ACTIVITY_SET_SETTING', id: record.id, settingId: setting.id, value });
-        record.settingValues = { ...record.settingValues, [setting.id]: result.value ?? value };
+        record.settingValues = { ...currentRecord.settingValues, [setting.id]: result.value ?? value };
+        currentRecord.settingValues = record.settingValues;
         saved = true;
         await refreshInstalled();
       } catch (error) {
@@ -426,6 +472,17 @@ function renderActivitySettings(record, card) {
 }
 
 function renderInstalled() {
+  // Live diagnostics change frequently, but only these fields affect a card or
+  // its actions. Keep the existing DOM while the visible library is unchanged.
+  const renderKey = JSON.stringify([developerEnabled.checked, installed.map((record) => [
+    record.id, record.name, record.description, record.category, record.version,
+    record.matches, record.apiVersion, record.pageAccess, record.network,
+    record.icon || catalog?.activities?.find((entry) => entry.id === record.id)?.icon,
+    record.source?.type, record.enabled, record.status, record.compatibilityStatus,
+    record.error, record.settings, record.settingValues,
+  ])]);
+  if (renderKey === installedRenderKey) return;
+  installedRenderKey = renderKey;
   rememberInstalledSettingsScroll();
   const active = document.activeElement;
   const focusedActivityId = active?.closest?.('.installed-activity-card')?.dataset.activityId;
@@ -438,7 +495,7 @@ function renderInstalled() {
   if (!installed.length) {
     const empty = element('div');
     appendEmpty(empty, 'No Activities installed', 'Browse Discover or load a local Activity in Developer.');
-    installedList.replaceChildren(...empty.children);
+    replaceLibraryCards(installedList, [...empty.children]);
     return;
   }
   for (const record of installed) {
@@ -450,7 +507,6 @@ function renderInstalled() {
     });
     card.classList.add('installed-activity-card');
     card.classList.toggle('has-developer-actions', developerEnabled.checked);
-    card.dataset.activityId = record.id;
     const statusText = {
       detected: 'Site detected',
       waiting: 'Waiting for site',
@@ -484,9 +540,7 @@ function renderInstalled() {
     card.append(actions);
     cards.push(card);
   }
-  // Attach the complete grid before scroll restoration triggers browser layout.
-  // A partially attached grid can temporarily shorten the page and clamp scrollY.
-  installedList.replaceChildren(...cards);
+  replaceLibraryCards(installedList, cards);
   restoreInstalledSettingsScroll();
   if (focusedAction && !document.getElementById('installed-view').hidden) {
     const card = cards.find((entry) => entry.dataset.activityId === focusedActivityId);
@@ -506,12 +560,15 @@ function renderUpdates() {
       ['repository', 'bundled'].includes(record?.source?.type) &&
       compareActivityVersions(entry.version, record.version) > 0;
   });
+  const renderKey = JSON.stringify([Boolean(catalog), pending.map((entry) => [entry, installedMap.get(entry.id).version])]);
+  if (renderKey === updatesRenderKey) return;
+  updatesRenderKey = renderKey;
   if (!pending.length) {
     const empty = element('div');
     appendEmpty(empty, 'You’re up to date', catalog
       ? 'No Activity updates are available.'
       : 'Refresh the catalog to check for updates.');
-    updatesList.replaceChildren(...empty.children);
+    replaceLibraryCards(updatesList, [...empty.children]);
     return;
   }
   for (const entry of pending) {
@@ -522,7 +579,7 @@ function renderUpdates() {
     card.append(actions);
     cards.push(card);
   }
-  updatesList.replaceChildren(...cards);
+  replaceLibraryCards(updatesList, cards);
 }
 
 function renderAll() {
@@ -543,7 +600,12 @@ function renderCategories() {
 
 function showView(view) {
   rememberInstalledSettingsScroll();
-  for (const button of document.querySelectorAll('.tab')) button.classList.toggle('is-active', button.dataset.view === view);
+  for (const button of document.querySelectorAll('.tab')) {
+    const selected = button.dataset.view === view;
+    button.classList.toggle('is-active', selected);
+    button.setAttribute('aria-selected', String(selected));
+    button.tabIndex = selected ? 0 : -1;
+  }
   for (const section of document.querySelectorAll('.view')) section.hidden = section.id !== `${view}-view`;
   if (view === 'installed') restoreInstalledSettingsScroll();
 }
@@ -769,8 +831,20 @@ async function loadLocalActivity() {
 }
 
 async function initialize() {
-  for (const button of document.querySelectorAll('.tab')) {
+  const tabs = [...document.querySelectorAll('.tab')];
+  for (const button of tabs) {
     button.addEventListener('click', () => showView(button.dataset.view));
+    button.addEventListener('keydown', (event) => {
+      const current = tabs.indexOf(button);
+      const next = event.key === 'ArrowRight' ? (current + 1) % tabs.length
+        : event.key === 'ArrowLeft' ? (current + tabs.length - 1) % tabs.length
+          : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : -1;
+      if (next < 0) return;
+      event.preventDefault();
+      showView(tabs[next].dataset.view);
+      tabs[next].focus({ preventScroll: true });
+      tabs[next].scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+    });
   }
   document.getElementById('refresh-catalog').addEventListener('click', refreshCatalog);
   document.getElementById('close-user-scripts-dialog').addEventListener('click', () => userScriptsDialog.close());

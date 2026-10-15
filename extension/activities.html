@@ -24,14 +24,14 @@
         <button class="button secondary" id="refresh-catalog" type="button">Refresh catalog</button>
       </section>
 
-      <nav class="tabs" aria-label="Activity Library sections">
-        <button class="tab is-active" data-view="discover" type="button">Discover</button>
-        <button class="tab" data-view="installed" type="button">Installed <span id="installed-count">0</span></button>
-        <button class="tab" data-view="updates" type="button">Updates <span id="update-count">0</span></button>
-        <button class="tab" data-view="developer" type="button">Developer</button>
+      <nav class="tabs" role="tablist" aria-label="Activity Library sections">
+        <button class="tab is-active" id="tab-discover" role="tab" aria-selected="true" aria-controls="discover-view" data-view="discover" type="button">Discover</button>
+        <button class="tab" id="tab-installed" role="tab" aria-selected="false" aria-controls="installed-view" tabindex="-1" data-view="installed" type="button">Installed <span id="installed-count">0</span></button>
+        <button class="tab" id="tab-updates" role="tab" aria-selected="false" aria-controls="updates-view" tabindex="-1" data-view="updates" type="button">Updates <span id="update-count">0</span></button>
+        <button class="tab" id="tab-developer" role="tab" aria-selected="false" aria-controls="developer-view" tabindex="-1" data-view="developer" type="button">Developer</button>
       </nav>
 
-      <section class="view" id="discover-view" aria-labelledby="discover-title">
+      <section class="view" id="discover-view" role="tabpanel" aria-labelledby="tab-discover" tabindex="0">
         <div class="view-heading"><h2 id="discover-title">Discover</h2><span class="muted" id="catalog-age"></span></div>
         <div class="filters">
           <label class="search"><span class="visually-hidden">Search Activities</span><input id="search" type="search" placeholder="Search Activities…" autocomplete="off" /></label>
@@ -41,17 +41,17 @@
         <div class="card-grid" id="discover-list"></div>
       </section>
 
-      <section class="view" id="installed-view" aria-labelledby="installed-title" hidden>
+      <section class="view" id="installed-view" role="tabpanel" aria-labelledby="tab-installed" tabindex="0" hidden>
         <div class="view-heading"><h2 id="installed-title">Installed</h2></div>
         <div class="card-grid" id="installed-list"></div>
       </section>
 
-      <section class="view" id="updates-view" aria-labelledby="updates-title" hidden>
+      <section class="view" id="updates-view" role="tabpanel" aria-labelledby="tab-updates" tabindex="0" hidden>
         <div class="view-heading"><h2 id="updates-title">Updates</h2></div>
         <div class="card-grid" id="updates-list"></div>
       </section>
 
-      <section class="view" id="developer-view" aria-labelledby="developer-title" hidden>
+      <section class="view" id="developer-view" role="tabpanel" aria-labelledby="tab-developer" tabindex="0" hidden>
         <div class="view-heading"><h2 id="developer-title">Developer Mode</h2></div>
         <label class="developer-toggle"><span><strong>Enable developer tools</strong><small>Show Activity logs and local package loading on this browser.</small></span><input id="developer-enabled" type="checkbox" /></label>
         <div class="developer-panel" id="developer-panel" hidden>

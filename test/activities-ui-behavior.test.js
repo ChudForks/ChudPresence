@@ -4,6 +4,7 @@ import test from 'node:test';
 import vm from 'node:vm';
 import * as validator from '../extension/core/activity-validator.js';
 import * as developerDiagnostics from '../extension/core/developer-diagnostics.js';
+import { compareActivityVersions } from '../extension/core/activity-repository.js';
 
 class Element {
   constructor(tag = 'div') {
@@ -17,9 +18,18 @@ class Element {
     this.selectionStart = 0;
     this.selectionEnd = 0;
     this.scrollTop = 0;
+    this.open = false;
     this.scrollHeight = 600;
     this.clientHeight = 300;
-    this.classList = { add: (...names) => { this.className += ` ${names.join(' ')}`; }, toggle() {} };
+    this.classList = {
+      add: (...names) => { this.className += ` ${names.join(' ')}`; },
+      toggle: (name, enabled) => {
+        const names = new Set(this.className.split(/\s+/).filter(Boolean));
+        if (enabled) names.add(name);
+        else names.delete(name);
+        this.className = [...names].join(' ');
+      },
+    };
   }
   append(...children) {
     this.children.push(...children);
@@ -32,8 +42,9 @@ class Element {
   getAttribute(name) { return this.attributes.get(name) ?? null; }
   addEventListener(type, callback) { this.listeners.set(type, callback); }
   removeEventListener(type, callback) { if (this.listeners.get(type) === callback) this.listeners.delete(type); }
-  emit(type) { return this.listeners.get(type)?.({ target: this }); }
+  emit(type, event = {}) { return this.listeners.get(type)?.({ target: this, ...event }); }
   focus(options) { this.ownerDocument.activeElement = this; this.focusOptions = options; }
+  scrollIntoView(options) { this.scrollIntoViewOptions = options; }
   select() { this.setSelectionRange(0, this.value.length); }
   setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; }
   matches(selector) {
@@ -51,7 +62,7 @@ class Element {
   }
 }
 
-async function createLibrary({ installed = [], developerMode = false, respond = null } = {}) {
+async function createLibrary({ installed = [], catalog = null, developerMode = false, respond = null } = {}) {
   installed = structuredClone(installed);
   const [source, html] = await Promise.all([
     readFile(new URL('../extension/activities.js', import.meta.url), 'utf8'),
@@ -59,7 +70,14 @@ async function createLibrary({ installed = [], developerMode = false, respond = 
   ]);
   const elements = new Map([...html.matchAll(/<([a-z][\w-]*)\b([^>]*\bid="([^"]+)"[^>]*)>/gi)].map((match) => {
     const node = new Element(match[1]);
+    node.id = match[3];
     node.className = /\bclass="([^"]*)"/.exec(match[2])?.[1] || '';
+    node.hidden = /\bhidden\b/.test(match[2]);
+    node.dataset.view = /\bdata-view="([^"]*)"/.exec(match[2])?.[1];
+    for (const attribute of ['aria-selected', 'tabindex']) {
+      const value = new RegExp(`\\b${attribute}="([^"]*)"`).exec(match[2])?.[1];
+      if (value !== undefined) node.setAttribute(attribute, value);
+    }
     node.readOnly = /\breadonly\b/.test(match[2]);
     if (node.tag === 'select') {
       const body = html.slice(match.index + match[0].length).split('</select>')[0];
@@ -71,7 +89,7 @@ async function createLibrary({ installed = [], developerMode = false, respond = 
     activeElement: null, hidden: false,
     getElementById: (id) => elements.get(id),
     createElement(tag) { const node = new Element(tag); node.ownerDocument = document; return node; },
-    querySelectorAll: () => [],
+    querySelectorAll: (selector) => [...elements.values()].filter((node) => node.matches(selector)),
   };
   for (const node of elements.values()) node.ownerDocument = document;
   const calls = [];
@@ -107,8 +125,8 @@ async function createLibrary({ installed = [], developerMode = false, respond = 
     location: { href: 'https://example.test/activities.html' },
     Option: class extends Element { constructor(label, value) { super('option'); this.textContent = label; this.value = value; } },
     ACTIVITY_REPOSITORY: { baseUrl: 'https://example.test/' },
-    compareActivityVersions: () => 0,
-    readCatalogCache: async () => ({ catalog: null, fetchedAt: 0 }),
+    compareActivityVersions,
+    readCatalogCache: async () => ({ catalog, fetchedAt: 0 }),
     requestHostPermissions: async () => true,
     setInterval: (callback) => { polling = callback; },
   });
@@ -214,12 +232,15 @@ test('a pending Library poll cannot replace a setting input when editing starts'
 });
 
 test('Library polling preserves focus on the same Activity action without scrolling', async () => {
-  const ui = await createLibrary({ installed: diagnosticRecords(), developerMode: true });
+  const records = diagnosticRecords();
+  const ui = await createLibrary({ installed: records, developerMode: true });
   ui.elements.get('installed-view').hidden = false;
   for (const action of ['activity-logs-action', 'activity-reload-action', 'activity-toggle-action', 'activity-remove-action']) {
     const oldCard = ui.elements.get('installed-list').children.find((card) => card.dataset.activityId === 'beta');
     const oldButton = oldCard.querySelector(`.${action}`);
     oldButton.focus();
+    records[1].name = `Beta ${action}`;
+    ui.setInstalled(records);
     ui.poll();
     await new Promise((resolve) => setImmediate(resolve));
     const newCard = ui.elements.get('installed-list').children.find((card) => card.dataset.activityId === 'beta');
@@ -247,6 +268,112 @@ test('A focused Reload action moves to Enable when that Activity becomes disable
   assert.equal(enable.textContent, 'Enable');
   assert.equal(ui.document.activeElement, enable);
   assert.equal(enable.focusOptions.preventScroll, true);
+});
+
+function pageAccessLibrary() {
+  const entry = {
+    id: 'page-access', name: 'Page access', version: '2.0.0', apiVersion: 2,
+    description: 'Page access disclosure fixture', matches: ['https://example.test/*'],
+    pageAccess: { url: true, queryParameters: ['video'] },
+  };
+  return { catalog: { activities: [entry] }, installed: [
+    { ...entry, version: '1.0.0', enabled: true, status: 'waiting', source: { type: 'repository' } },
+  ] };
+}
+
+test('Live diagnostics update without replacing unchanged cards in any Library grid', async () => {
+  const state = pageAccessLibrary();
+  const ui = await createLibrary({ ...state, developerMode: true });
+  const grids = ['discover-list', 'installed-list', 'updates-list'];
+  const cards = grids.map((id) => ui.elements.get(id).children[0]);
+  for (const card of cards) card.querySelector('.card-page-access').open = true;
+  state.installed[0].activityLogs = [{ timestamp: '2026-10-15T12:00:00Z', level: 'info', args: ['New live diagnostic'] }];
+  ui.setInstalled(state.installed);
+  ui.poll();
+  await new Promise((resolve) => setImmediate(resolve));
+  for (const [index, id] of grids.entries()) {
+    assert.equal(ui.elements.get(id).children[0], cards[index]);
+    assert.equal(cards[index].querySelector('.card-page-access').open, true);
+  }
+  assert.match(ui.elements.get('developer-log-output').value, /New live diagnostic/);
+});
+
+for (const view of ['discover', 'installed', 'updates']) {
+  for (const pending of [false, true]) {
+    test(`${view} preserves declared access and keyboard focus across a card update${pending ? ' already in flight' : ''}`, async () => {
+      const state = pageAccessLibrary();
+      const ui = await createLibrary(state);
+      const grid = ui.elements.get(`${view}-list`);
+      const original = grid.children[0].querySelector('.card-page-access');
+      const summary = original.querySelector('summary');
+      state.installed[0].version = '1.1.0';
+      ui.setInstalled(state.installed);
+      if (pending) ui.poll();
+      original.open = true;
+      original.querySelector('.page-access-list').scrollTop = 70;
+      summary.focus();
+      if (!pending) ui.poll();
+      await new Promise((resolve) => setImmediate(resolve));
+      const refreshed = grid.children[0].querySelector('.card-page-access');
+      assert.notEqual(refreshed, original);
+      assert.equal(refreshed.open, true);
+      assert.equal(refreshed.querySelector('.page-access-list').tag, 'ul');
+      assert.deepEqual(refreshed.querySelector('.page-access-list').children.map((item) => [item.tag, item.textContent]), [
+        ['li', 'Page origin and path'], ['li', 'Query parameters: video'],
+      ]);
+      assert.equal(refreshed.querySelector('.page-access-list').scrollTop, 70);
+      assert.equal(ui.document.activeElement, refreshed.querySelector('summary'));
+      assert.equal(ui.document.activeElement.focusOptions.preventScroll, true);
+
+      refreshed.open = false;
+      state.installed[0].version = '1.2.0';
+      ui.setInstalled(state.installed);
+      ui.poll();
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(grid.children[0].querySelector('.card-page-access').open, false);
+    });
+  }
+}
+
+test('Discover remembers disclosures through filtering without opening them in another Library view', async () => {
+  const ui = await createLibrary(pageAccessLibrary());
+  const grid = ui.elements.get('discover-list');
+  grid.children[0].querySelector('.card-page-access').open = true;
+  const search = ui.elements.get('search');
+  search.value = 'no matching Activity';
+  await search.emit('input');
+  assert.equal(grid.children[0].className, 'empty-state');
+  search.value = '';
+  await search.emit('input');
+  assert.equal(grid.children[0].querySelector('.card-page-access').open, true);
+  assert.equal(ui.elements.get('installed-list').querySelector('.card-page-access').open, false);
+});
+
+test('Library tabs support click selection and standard keyboard navigation', async () => {
+  const ui = await createLibrary();
+  const tabs = ['discover', 'installed', 'updates', 'developer'].map((view) => ui.elements.get(`tab-${view}`));
+  await tabs[1].emit('click');
+  assert.equal(tabs[1].getAttribute('aria-selected'), 'true');
+  assert.equal(tabs[1].tabIndex, 0);
+  assert.equal(tabs[0].getAttribute('aria-selected'), 'false');
+  assert.equal(tabs[0].tabIndex, -1);
+  assert.equal(ui.elements.get('installed-view').hidden, false);
+  assert.equal(ui.elements.get('discover-view').hidden, true);
+
+  for (const [from, key, to] of [[1, 'ArrowRight', 2], [2, 'End', 3], [3, 'ArrowRight', 0], [0, 'ArrowLeft', 3], [3, 'Home', 0]]) {
+    let prevented = false;
+    await tabs[from].emit('keydown', { key, preventDefault() { prevented = true; } });
+    assert.equal(prevented, true);
+    assert.equal(ui.document.activeElement, tabs[to]);
+    assert.equal(tabs[to].scrollIntoViewOptions.inline, 'nearest');
+    assert.equal(tabs[to].scrollIntoViewOptions.block, 'nearest');
+    assert.equal(tabs[to].scrollIntoViewOptions.behavior, 'instant');
+    assert.equal(tabs[to].getAttribute('aria-selected'), 'true');
+    assert.equal(tabs[to].tabIndex, 0);
+    assert.equal(ui.elements.get(`${tabs[to].dataset.view}-view`).hidden, false);
+    assert.equal(tabs.filter((tab) => tab.tabIndex === 0).length, 1);
+    assert.equal(tabs.filter((tab) => tab.getAttribute('aria-selected') === 'true').length, 1);
+  }
 });
 
 function diagnosticRecords() {
@@ -388,6 +515,9 @@ test('Paused runtime snapshots remain unchanged when an Activity setting is save
   pause.checked = true;
   await pause.emit('change');
   const setting = ui.elements.get('installed-list').querySelector('input');
+  ui.poll();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(ui.elements.get('installed-list').querySelector('input'), setting);
   setting.value = 'Saved while paused';
   ui.failState();
   await setting.emit('change');
