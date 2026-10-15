@@ -12,7 +12,7 @@ const MAX_JSON_DEPTH = 6;
 const MAX_JSON_ARRAY = 32;
 const MAX_MEDIA = 16;
 const SELECTOR_ATTRIBUTES = new Set([
-  'class', 'id', 'role', 'type', 'name', 'property', 'itemprop', 'slot',
+  'class', 'id', 'role', 'type', 'name', 'property', 'itemprop', 'slot', 'dir',
   'title', 'alt', 'aria-label', 'aria-hidden', 'aria-current', 'aria-selected',
   'aria-pressed', 'aria-expanded', 'data-testid', 'data-test', 'data-cy', 'data-qa',
 ]);
@@ -172,7 +172,7 @@ export function validateActivityV2Selector(value) {
 
 export function validateActivityV2PageAccess(value = {}) {
   plainObject(value, 'declaration');
-  allowedFields(value, ['selectors', 'media', 'url', 'queryParameters'], 'declaration');
+  allowedFields(value, ['selectors', 'media', 'url', 'queryParameters', 'mediaScopes'], 'declaration');
   const declarations = value.selectors === undefined ? {} : plainObject(value.selectors, 'selectors');
   const entries = Object.entries(declarations);
   if (entries.length > MAX_CAPTURES) fail(`allows at most ${MAX_CAPTURES} named captures.`);
@@ -210,6 +210,31 @@ export function validateActivityV2PageAccess(value = {}) {
     if (value[field] !== undefined && typeof value[field] !== 'boolean') fail(`${field} must be boolean.`);
   }
   const normalized = { selectors, media: value.media === true, url: value.url === true };
+  if (value.mediaScopes !== undefined) {
+    if (!normalized.media) fail('mediaScopes requires media: true.');
+    const scopes = plainObject(value.mediaScopes, 'mediaScopes');
+    if (Object.keys(scopes).length > 4) fail('allows at most four media scopes.');
+    normalized.mediaScopes = {};
+    let captures = entries.length;
+    for (const [name, scope] of Object.entries(scopes)) {
+      if (!/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(name) || ['constructor', 'prototype'].includes(name)) fail('media scope names must be safe identifiers.');
+      plainObject(scope, `media scope ${name}`);
+      allowedFields(scope, ['container', 'ancestors', 'exclude', 'selectors'], `media scope ${name}`);
+      if (!Number.isInteger(scope.ancestors) || scope.ancestors < 1 || scope.ancestors > 16) fail('media scope ancestors must be between 1 and 16.');
+      if (scope.selectors === undefined) fail('media scope selectors must be declared.');
+      const scopedSelectors = validateActivityV2PageAccess({ selectors: scope.selectors }).selectors;
+      if (Object.values(scopedSelectors).some(capture => capture.read === 'json')) fail('media scopes allow only public text and attribute reads.');
+      captures += Object.keys(scopedSelectors).length;
+      if (captures > MAX_CAPTURES) fail('allows at most 32 captures across page and media scopes.');
+      // Shadow traversal is unnecessary for an ancestor boundary and cannot be
+      // evaluated with matches(). Scoped descendant reads retain normal grammar.
+      const container = validateActivityV2Selector(scope.container);
+      const exclude = scope.exclude === undefined ? undefined : validateActivityV2Selector(scope.exclude);
+      if (splitShadow(container).length !== 1 || exclude && splitShadow(exclude).length !== 1) fail('media scope boundaries cannot cross shadow roots.');
+      normalized.mediaScopes[name] = { container, ancestors: scope.ancestors, selectors: scopedSelectors,
+        ...(exclude ? { exclude } : {}) };
+    }
+  }
   if (value.queryParameters !== undefined) {
     if (!Array.isArray(value.queryParameters) || value.queryParameters.length > 16) fail('queryParameters must contain at most 16 unique public parameter names.');
     normalized.queryParameters = [];
@@ -279,16 +304,18 @@ function splitShadow(selector) {
   return parts;
 }
 
-function select(document, selector) {
+function select(document, selector, budget) {
   let roots = [document];
   const parts = splitShadow(selector);
-  let candidates = MAX_QUERY_CANDIDATES;
+  let candidates = budget ? Math.min(MAX_QUERY_CANDIDATES, budget.scopedCandidates) : MAX_QUERY_CANDIDATES;
   for (let index = 0; index < parts.length; index++) {
     const next = [];
     for (const root of roots) {
       let matches;
       try { matches = root.querySelectorAll(parts[index]); } catch { continue; }
+      if (budget && matches.length > Math.min(candidates, MAX_QUERY_CANDIDATES - next.length)) budget.selectionLimited = true;
       for (let match = 0; match < matches.length && candidates > 0 && next.length < MAX_QUERY_CANDIDATES; match++, candidates--) {
+        if (budget) budget.scopedCandidates--;
         const element = matches[match];
         if (index === parts.length - 1) next.push(element);
         else if (element.shadowRoot && publicElement(element, document)) next.push(element.shadowRoot);
@@ -297,7 +324,7 @@ function select(document, selector) {
     }
     roots = next;
     if (!roots.length) break;
-    if (candidates <= 0 && index < parts.length - 1) return [];
+    if (candidates <= 0 && index < parts.length - 1) { if (budget) budget.selectionLimited = true; return []; }
   }
   return roots;
 }
@@ -419,8 +446,131 @@ function finite(value, fallback = 0, min = -1000000, max = 1000000) {
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
 }
 
-function collectMedia(document) {
+function scopedPublicElement(element, document) {
+  if (!publicElement(element, document)) return false;
+  for (let current = element; current; current = parent(current)) {
+    try {
+      const style = document.defaultView?.getComputedStyle?.(current);
+      if (style?.opacity === '0' || style?.contentVisibility === 'hidden') return false;
+    } catch { return false; }
+  }
+  return true;
+}
+
+function scopedText(element, document) {
+  const chunks = [];
+  const stack = [element];
+  let visited = 0;
+  let length = 0;
+  while (stack.length) {
+    if (++visited > MAX_TEXT_NODES) return null;
+    const node = stack.pop();
+    if (node.nodeType === 3) {
+      const text = String(node.nodeValue || '');
+      if ((length += text.length) > MAX_TEXT_LENGTH) return null;
+      chunks.push(text);
+    } else {
+      // Unlike a general text read, a scoped field fails closed if a hidden or
+      // sensitive descendant could change its meaning (creator/caption identity).
+      if (!scopedPublicElement(node, document)) return null;
+      const children = node.childNodes || [];
+      if (children.length + visited + stack.length > MAX_TEXT_NODES) return null;
+      for (let index = children.length - 1; index >= 0; index--) stack.push(children[index]);
+    }
+  }
+  return publicString(chunks.join(' ').replace(/\s+/g, ' ').trim(), document);
+}
+
+function scopedContainer(video, scope, document, context) {
+  let current = video;
+  for (let step = 0; step < scope.ancestors; step++) {
+    if (context.scopeSteps-- <= 0) return null;
+    current = parent(current);
+    if (!current || ['HTML', 'BODY', 'MAIN'].includes(tag(current)) || attr(current, 'role') === 'main' ||
+        !scopedPublicElement(current, document)) return null;
+    try {
+      if (scope.exclude && current.matches(scope.exclude)) return null;
+      if (!current.matches(scope.container)) continue;
+      // Count every native player, including hidden neighbors. Never widen an
+      // ambiguous winning card to an application root or another player's card.
+      return singleScopedPlayer(current, video, context) ? current : null;
+    } catch { return null; }
+  }
+  return null;
+}
+
+function singleScopedPlayer(container, video, context) {
+  const roots = container.shadowRoot ? [container, container.shadowRoot] : [container];
+  let player = null;
+  for (let index = 0; index < roots.length && index < 64; index++) {
+    const root = roots[index];
+    const players = root.querySelectorAll('video, audio');
+    if (players.length > 1 || players.length && player) return false;
+    if (players.length) player = players[0];
+    const descendants = root.querySelectorAll('*');
+    if (descendants.length > context.scopeScanRemaining) return false;
+    context.scopeScanRemaining -= descendants.length;
+    for (let child = 0; child < descendants.length; child++) {
+      if (!descendants[child].shadowRoot) continue;
+      if (roots.length >= 64) return false;
+      roots.push(descendants[child].shadowRoot);
+    }
+  }
+  return player === video;
+}
+
+function collectScopedReads(root, scope, document, context) {
+  const reads = {};
+  const rejected = [];
+  for (const [name, capture] of Object.entries(scope.selectors)) {
+    const values = [];
+    if (context.readsRemaining <= 0 || context.outputRemaining <= 0 || context.scopedCandidates <= 0) {
+      reads[name] = capture.all ? [] : null; rejected.push(name); continue;
+    }
+    context.selectionLimited = false;
+    const elements = select(root, capture.selector, context);
+    if (context.selectionLimited) rejected.push(name);
+    const count = capture.all ? Math.min(elements.length, MAX_MATCHES) : Math.min(elements.length, 1);
+    if (capture.all && elements.length > MAX_MATCHES) rejected.push(name);
+    for (let index = 0; index < count; index++) {
+      if (context.readsRemaining <= 0 || context.outputRemaining <= 0) { rejected.push(name); break; }
+      context.readsRemaining--;
+      const element = elements[index];
+      let value = null;
+      // Element.querySelectorAll returns only descendants; additionally enforce
+      // containment after >>>, so no read can escape the approved card boundary.
+      let ancestor = element;
+      for (let depth = 0; ancestor && ancestor !== root && depth < 128; depth++) ancestor = parent(ancestor);
+      if (ancestor === root && scopedPublicElement(element, document)) {
+        if (capture.read === 'text') value = scopedText(element, document);
+        else if (capture.read === 'attribute') value = readAttribute(element, capture.attribute, document);
+      }
+      if (value === null) rejected.push(name);
+      const size = JSON.stringify(value).length;
+      if (size > context.outputRemaining) { value = null; context.outputRemaining = 0; rejected.push(name); }
+      else context.outputRemaining -= size;
+      values.push(value);
+    }
+    reads[name] = capture.all ? values : values[0] ?? null;
+  }
+  return { reads, rejected: [...new Set(rejected)] };
+}
+
+function collectMedia(document, access, context) {
   const result = [];
+  const scopedPlayers = [];
+  function finish() {
+    // Spend shared scope budgets on the largest visible players first, while
+    // preserving the existing DOM-order media array for older packages.
+    scopedPlayers.sort((left, right) => right.media.visibleArea - left.media.visibleArea);
+    for (const { element, media } of scopedPlayers) {
+      for (const [name, scope] of Object.entries(access.mediaScopes)) {
+        const root = media.visibleArea > 0 && media.readyState >= 2 && !media.ended ? scopedContainer(element, scope, document, context) : null;
+        media.scopes[name] = root ? collectScopedReads(root, scope, document, context) : null;
+      }
+    }
+    return result;
+  }
   const roots = [document];
   let hostCandidates = 2048;
   let mediaCandidates = MAX_QUERY_CANDIDATES;
@@ -429,7 +579,7 @@ function collectMedia(document) {
     let elements;
     try { elements = root.querySelectorAll('video, audio'); } catch { continue; }
     for (let index = 0; index < elements.length && mediaCandidates-- > 0; index++) {
-      if (result.length >= MAX_MEDIA) return result;
+      if (result.length >= MAX_MEDIA) return finish();
       const element = elements[index];
       if (!publicElement(element, document, { ignoreVisibility: true })) continue;
       let rect;
@@ -444,6 +594,15 @@ function collectMedia(document) {
       };
       const poster = cleanUrl(attr(element, 'poster'), document);
       if (poster) media.poster = poster;
+      if (access.mediaScopes) {
+        media.readyState = finite(element.readyState, 0, 0, 4);
+        const view = document.defaultView;
+        const width = Math.max(0, Math.min(media.rect.x + media.rect.width, finite(view?.innerWidth, 0, 0)) - Math.max(0, media.rect.x));
+        const height = Math.max(0, Math.min(media.rect.y + media.rect.height, finite(view?.innerHeight, 0, 0)) - Math.max(0, media.rect.y));
+        media.visibleArea = scopedPublicElement(element, document) ? width * height : 0;
+        media.scopes = {};
+        scopedPlayers.push({ element, media });
+      }
       result.push(media);
     }
     if (result.length >= MAX_MEDIA || mediaCandidates <= 0) break;
@@ -457,14 +616,15 @@ function collectMedia(document) {
       if (host.shadowRoot && publicElement(host, document, { ignoreVisibility: true })) roots.push(host.shadowRoot);
     }
   }
-  return result;
+  return finish();
 }
 
 /** Produce a fresh, bounded, data-only snapshot using the host-approved declaration. */
 export function collectActivityV2Snapshot(pageAccess, document = globalThis.document) {
   const access = validateActivityV2PageAccess(pageAccess);
   const snapshot = { page: {}, reads: {}, media: [] };
-  const context = { json: new Map(), jsonRemaining: 1048576, outputRemaining: 65536, readsRemaining: 128 };
+  const context = { json: new Map(), jsonRemaining: 1048576, outputRemaining: 65536, readsRemaining: 128,
+    scopedCandidates: 512, scopeSteps: 256, scopeScanRemaining: 2048 };
   if (!document) return snapshot;
   if (access.url) {
     if (['visible', 'hidden', 'prerender'].includes(document.visibilityState)) {
@@ -514,6 +674,6 @@ export function collectActivityV2Snapshot(pageAccess, document = globalThis.docu
     }
     snapshot.reads[name] = capture.all ? values : values[0] ?? null;
   }
-  if (access.media) snapshot.media = collectMedia(document);
+  if (access.media) snapshot.media = collectMedia(document, access, context);
   return snapshot;
 }

@@ -520,8 +520,173 @@
               }
             ]
           }
+        },
+        "mediaScopes": {
+          "type": "object",
+          "maxProperties": 4,
+          "propertyNames": {
+            "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$",
+            "not": {
+              "enum": [
+                "constructor",
+                "prototype"
+              ]
+            }
+          },
+          "description": "Bounded single-player ancestor containers. Requires media: true; all captures share the page read limits.",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "container",
+              "ancestors",
+              "selectors"
+            ],
+            "properties": {
+              "container": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              },
+              "ancestors": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 16
+              },
+              "exclude": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              },
+              "selectors": {
+                "type": "object",
+                "maxProperties": 32,
+                "propertyNames": {
+                  "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$",
+                  "not": {
+                    "enum": [
+                      "constructor",
+                      "prototype"
+                    ]
+                  }
+                },
+                "additionalProperties": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "selector",
+                    "read"
+                  ],
+                  "properties": {
+                    "selector": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1024,
+                      "description": "Validated public CSS grammar. No escapes, secret attribute predicates, or stateful pseudos. >>> crosses an open shadow root."
+                    },
+                    "read": {
+                      "enum": [
+                        "text",
+                        "attribute"
+                      ]
+                    },
+                    "all": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "attribute": {
+                      "enum": [
+                        "title",
+                        "alt",
+                        "aria-label",
+                        "href",
+                        "src",
+                        "poster",
+                        "content",
+                        "datetime"
+                      ]
+                    },
+                    "path": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 12,
+                      "items": {
+                        "type": "string",
+                        "maxLength": 100,
+                        "pattern": "^(?:[A-Za-z_][A-Za-z0-9_-]*|[0-9]+)$",
+                        "description": "Own-property keys only. Credential and prototype keys are rejected by the runtime."
+                      }
+                    }
+                  },
+                  "allOf": [
+                    {
+                      "if": {
+                        "properties": {
+                          "read": {
+                            "const": "attribute"
+                          }
+                        }
+                      },
+                      "then": {
+                        "required": [
+                          "attribute"
+                        ]
+                      },
+                      "else": {
+                        "not": {
+                          "required": [
+                            "attribute"
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "if": {
+                        "properties": {
+                          "read": {
+                            "const": "json"
+                          }
+                        }
+                      },
+                      "then": {
+                        "required": [
+                          "path"
+                        ]
+                      },
+                      "else": {
+                        "not": {
+                          "required": [
+                            "path"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "mediaScopes"
+            ]
+          },
+          "then": {
+            "required": [
+              "media"
+            ],
+            "properties": {
+              "media": {
+                "const": true
+              }
+            }
+          }
+        }
+      ]
     }
   }
 }

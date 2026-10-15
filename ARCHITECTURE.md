@@ -26,6 +26,16 @@ the page world; the manager rejects `page.execute` for v2 independently of the
 guest bridge. Lifecycle teardown disposes the interpreter on disable/removal,
 reload, document exit, route scope loss, or execution failure.
 
+Version 2.0.2 adds optional `pageAccess.mediaScopes` inside the existing broker.
+Each native player can carry sanitized descendant reads from its nearest
+declared single-player ancestor (at most 16 steps), with rejected-field evidence.
+Root, visibility, sensitivity, containment and multi-player checks fail closed;
+native players in open shadow roots count toward ambiguity. Shared page capture,
+read and output limits remain in force, with extra aggregate traversal limits.
+Guest code receives only JSON; worker isolation, bridge operations, network
+permissions and V1 remain unchanged. Instagram's Reels selection and formatting
+live in its independent V2 package, with no Instagram adapter in the extension.
+
 See [the v2 contract and threat model](extension/ACTIVITY_API_V2.md) for exact
 capabilities, resource limits, migration guidance, and limits of data filtering.
 The broader native Activity wrapper described below applies to v1.

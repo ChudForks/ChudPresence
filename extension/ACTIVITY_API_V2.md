@@ -117,6 +117,64 @@ parameter names are allowed; credential/OAuth names such as `token`, `code`,
 `state`, `key`, and `SAMLResponse` are rejected. Undeclared query values and the
 URL fragment stay inaccessible.
 
+## Bind metadata to a native player (extension 2.0.2)
+
+Declare `media: true` and up to four `mediaScopes` to read public text or
+attributes from the nearest matching ancestor of each video/audio element:
+
+```json
+{
+  "media": true,
+  "mediaScopes": {
+    "card": {
+      "container": ".reel-card",
+      "ancestors": 16,
+      "exclude": ".application-root",
+      "selectors": {
+        "caption": { "selector": ".caption", "read": "text" },
+        "creator": { "selector": "header a", "read": "attribute", "attribute": "href" }
+      }
+    }
+  }
+}
+```
+
+`media.getAll()` retains its existing DOM order and adds `readyState`,
+`visibleArea` (pixels clipped to the viewport), and `scopes` only when scopes
+are declared. For example, `player.scopes.card` is either `null`, or
+`{ reads: { caption: "Example", creator: "https://example.com/creator/" }, rejected: [] }`.
+Playback and scoped reads belong to the same native element; no DOM identity,
+node, persistent handle, page globals or execution capability crosses the sandbox.
+
+The broker walks at most 16 ancestors and stops before HTML, BODY, MAIN,
+`role="main"`, an excluded boundary or a hidden/sensitive container. The nearest
+matching container must contain exactly one native player, counting hidden
+players and players inside open shadow roots. Ambiguity fails closed. Reads
+are limited to that container's descendants, including explicitly declared open
+shadow traversal. Scoped JSON reads are not supported. `dir` joins the public
+selector-attribute allowlist for caption layouts; it is not a new readable attribute.
+
+Missing captures return `null` (or `[]` with `all`). Hidden, sensitive, oversized,
+out-of-boundary or budget-limited captures additionally list their name in
+`rejected`. A scalar uses its first matching element and does not skip an invalid
+first candidate. Scoped text rejects hidden/sensitive descendants rather than
+silently dropping them. Packages can therefore distinguish an absent caption
+from an invalid caption and clear when winning-card metadata is rejected.
+The ordinary public-string and URL sanitizers apply to every value.
+
+All page and scoped declarations share the existing **32 captures, 128 reads
+and 64 KiB captured-value budget** per snapshot. Scoped work additionally shares
+512 selected candidates, 256 ancestor steps and 2048 inspected card descendants;
+these limits do not multiply per player. Native discovery retains the existing
+16-player cap. Scope budgets are spent on the largest visible players first;
+output media order stays unchanged. Packages should select their player before
+validating its metadata and clear on an invalid winner. They must not select a
+smaller player merely because its metadata is complete.
+
+Scopes are fixed metadata, displayed in the Library's declared-page-access
+review, and supplied through normal package installation. Adding them requires
+reimporting the updated package. Existing packages gain no scoped reads.
+
 ## Write an Activity
 
 The host updates the snapshot approximately every two seconds, including SPA

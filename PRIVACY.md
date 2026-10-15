@@ -8,6 +8,13 @@ execution are unavailable. Public text/attribute/JSON declarations are shown
 in the Library. URL queries/fragments and recognizable credentials are filtered;
 anonymous network calls omit browser credentials and reject redirects.
 
+Version 2.0.2 adds optional, declared media scopes: sanitized public fields from
+a bounded single-player card are returned alongside that player's playback.
+This exposes their relationship as well as the values. Scopes appear in the
+Library's access review, use the same sensitive-content filters and shared read
+limits, and provide no DOM handles or additional browser permissions. Existing
+packages receive no scoped fields unless updated and reimported.
+
 Selected visible text can still be private, and unknown or disguised secrets
 cannot always be recognized. Packages can transmit data they are allowed to
 read using declared network endpoints or presence reports. Review those

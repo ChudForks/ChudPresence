@@ -3,7 +3,8 @@ export type PublicAttribute = 'title' | 'alt' | 'aria-label' | 'href' | 'src' | 
 export type PageRead = { selector: string; all?: boolean } & (
   { read: 'text' } | { read: 'attribute'; attribute: PublicAttribute } | { read: 'json'; path: string[] }
 );
-export interface PageAccess { selectors?: Record<string, PageRead>; media?: boolean; url?: boolean; queryParameters?: string[] }
+export interface MediaScope { container: string; ancestors: number; exclude?: string; selectors: Record<string, Exclude<PageRead, { read: 'json' }>> }
+export interface PageAccess { selectors?: Record<string, PageRead>; media?: boolean; url?: boolean; queryParameters?: string[]; mediaScopes?: Record<string, MediaScope> }
 export interface ActivityV2Metadata {
   id: string; name: string; description: string; version: string; apiVersion: 2;
   matches: string[]; entry: 'activity.js'; pageAccess?: PageAccess;
@@ -25,6 +26,10 @@ export interface MediaSnapshot {
   currentTime: number; duration: number; paused: boolean; ended: boolean;
   playbackRate: number; muted: boolean; visible: boolean; poster?: string;
   rect: { x: number; y: number; width: number; height: number };
+  /** Present only with declared mediaScopes. No DOM identity or browser handles. */
+  readyState?: number;
+  visibleArea?: number;
+  scopes?: Readonly<Record<string, { readonly reads: Readonly<Record<string, Json>>; readonly rejected: readonly string[] } | null>>;
 }
 export interface Snapshot {
   readonly page: { readonly origin?: string; readonly pathname?: string; readonly visibilityState?: 'visible' | 'hidden' | 'prerender'; readonly query?: Readonly<Record<string, string | null>>; readonly queryDuplicates?: readonly string[] };

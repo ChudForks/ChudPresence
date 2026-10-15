@@ -48,6 +48,24 @@ metadataSchema.properties.pageAccess = {
     },
   },
 };
+metadataSchema.properties.pageAccess.properties.mediaScopes = {
+  type: 'object', maxProperties: 4,
+  propertyNames: structuredClone(metadataSchema.properties.pageAccess.properties.selectors.propertyNames),
+  description: 'Bounded single-player ancestor containers. Requires media: true; all captures share the page read limits.',
+  additionalProperties: {
+    type: 'object', additionalProperties: false, required: ['container', 'ancestors', 'selectors'],
+    properties: {
+      container: { type: 'string', minLength: 1, maxLength: 1024 },
+      ancestors: { type: 'integer', minimum: 1, maximum: 16 },
+      exclude: { type: 'string', minLength: 1, maxLength: 1024 },
+      selectors: structuredClone(metadataSchema.properties.pageAccess.properties.selectors),
+    },
+  },
+};
+metadataSchema.properties.pageAccess.allOf = [{
+  if: { required: ['mediaScopes'] }, then: { required: ['media'], properties: { media: { const: true } } },
+}];
+metadataSchema.properties.pageAccess.properties.mediaScopes.additionalProperties.properties.selectors.additionalProperties.properties.read.enum = ['text', 'attribute'];
 const reportSchema = structuredClone(v1.reportSchema);
 reportSchema.$id = 'https://chudpresence.local/schemas/activity-v2-report.schema.json';
 reportSchema.title = 'ChudPresence Activity API v2 Report';

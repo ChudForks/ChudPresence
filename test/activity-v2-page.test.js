@@ -339,3 +339,120 @@ test('capture arrays, text, aggregate output, and JSON input are bounded', () =>
   const script = element('script', { type: 'application/json' }, [JSON.stringify({ movie: 'x'.repeat(262144) })]);
   assert.equal(collectActivityV2Snapshot({ selectors: { data: capture('#state', 'json', { path: ['movie'] }) } }, documentFixture({ '#state': [script] })).reads.data, null);
 });
+
+const scopedAccess = {
+  media: true,
+  mediaScopes: { card: { container: '.card', ancestors: 4, exclude: '.app', selectors: {
+    title: capture('.caption'), creator: capture('a'), href: capture('a', 'attribute', { attribute: 'href' }),
+  } } },
+};
+function scopedFixture() {
+  const video = Object.assign(element('video'), { readyState: 4, currentTime: 12, duration: 60, paused: true });
+  const title = element('h1', {}, ['Reel caption']);
+  const creator = element('a', { href: '/example.creator/?tracking=PRIVATE#fragment' }, ['example.creator']);
+  const card = element('article', {}, [video, title, creator]);
+  card.matches = selector => selector === '.card' || selector === '.app' && card.app;
+  card.querySelectorAll = selector => ({ 'video, audio': [video], '.caption': [title], a: [creator], '*': [video, title, creator] })[selector] || [];
+  const document = documentFixture({ 'video, audio': [video] });
+  Object.assign(document.defaultView, { innerWidth: 800, innerHeight: 600 });
+  return { video, title, creator, card, document, collect: (access = scopedAccess) => collectActivityV2Snapshot(access, document).media[0] };
+}
+
+test('media scopes are explicit, bounded declarations using the existing selector and attribute allowlists', () => {
+  assert.ok(validateActivityV2PageAccess(scopedAccess).mediaScopes.card);
+  assert.equal(validateActivityV2Selector('[dir="auto"]'), '[dir="auto"]');
+  for (const change of [
+    { media: false }, { mediaScopes: [] },
+    { mediaScopes: Object.fromEntries(Array.from({ length: 5 }, (_, i) => [`scope${i}`, scopedAccess.mediaScopes.card])) },
+    ...[0, 17, 1.5].map(ancestors => ({ mediaScopes: { card: { ...scopedAccess.mediaScopes.card, ancestors } } })),
+    ...[
+      { container: 'input[value^="A"]' }, { exclude: '[data-token]' }, { container: 'site-player >>> .card' },
+      { selectors: undefined }, { runtimeSelector: true },
+      { selectors: { secret: capture('input', 'attribute', { attribute: 'value' }) } },
+      { selectors: { json: capture('script', 'json', { path: ['movie'] }) } },
+    ].map(scope => ({ mediaScopes: { card: { ...scopedAccess.mediaScopes.card, ...scope } } })),
+    { selectors: Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`title${i}`, capture('h1')])) },
+  ]) assert.throws(() => validateActivityV2PageAccess({ ...scopedAccess, ...change }), /pageAccess/);
+});
+
+test('scoped reads bind sanitized card fields to native playback and expose clipped viewport area', () => {
+  const f = scopedFixture();
+  f.video.rect = { x: -20, y: 580, width: 100, height: 50 };
+  const media = f.collect();
+  assert.equal(media.visibleArea, 1600);
+  assert.equal(media.readyState, 4);
+  assert.equal(media.paused, true);
+  assert.deepEqual(media.scopes.card, { reads: { title: 'Reel caption', creator: 'example.creator', href: 'https://example.com/example.creator/' }, rejected: [] });
+  assert.doesNotMatch(JSON.stringify(media), /PRIVATE|nodeType|parentElement|querySelector/);
+  f.video.rect.y = 700;
+  assert.equal(f.collect().scopes.card, null);
+  f.video.rect.y = 0; f.video.readyState = 0;
+  assert.equal(f.collect().scopes.card, null);
+});
+
+test('scoped fields distinguish absent captions from hidden, sensitive, truncated and escaped reads', () => {
+  const missing = scopedFixture();
+  missing.card.querySelectorAll = selector => selector === '.caption' ? [] : ({ 'video, audio': [missing.video], a: [missing.creator] })[selector] || [];
+  assert.equal(missing.collect().scopes.card.reads.title, null);
+  assert.deepEqual(missing.collect().scopes.card.rejected, []);
+  for (const mutate of [
+    f => { f.title.attributes.hidden = ''; },
+    f => { f.title.computedStyle = { opacity: '0' }; },
+    f => { f.title.computedStyle = { contentVisibility: 'hidden' }; },
+    f => { f.title.append(element('span', { hidden: '' }, ['PRIVATE'])); },
+    f => { f.title.append(element('form', {}, ['PRIVATE'])); },
+    f => { f.title.append('x'.repeat(4097)); },
+    f => { f.title.parentElement = null; },
+  ]) {
+    const f = scopedFixture(); mutate(f);
+    const scope = f.collect().scopes.card;
+    assert.equal(scope.reads.title, null);
+    assert.ok(scope.rejected.includes('title'));
+    assert.doesNotMatch(JSON.stringify(scope), /PRIVATE/);
+  }
+});
+
+test('scope boundaries reject multiple players, app roots, hidden/sensitive ancestors and excess depth', () => {
+  for (const mutate of [
+    f => { f.card.tagName = 'MAIN'; },
+    f => { f.card.attributes.role = 'main'; },
+    f => { f.card.app = true; },
+    f => { f.card.attributes.class = 'login-panel'; },
+    f => { f.card.attributes.hidden = ''; },
+    f => { f.video.parentElement = element('div'); },
+    f => { const original = f.card.querySelectorAll; f.card.querySelectorAll = s => s === 'video, audio' ? [f.video, element('video', { hidden: '' })] : original(s); },
+    f => { const host = element('site-player'); host.shadowRoot = { querySelectorAll: s => s === 'video, audio' ? [element('video')] : [] };
+      const original = f.card.querySelectorAll; f.card.querySelectorAll = s => s === '*' ? [host] : original(s); },
+    f => { const original = f.card.querySelectorAll; f.card.querySelectorAll = s => s === '*' ? Array(2049).fill(f.title) : original(s); },
+  ]) { const f = scopedFixture(); mutate(f); assert.equal(f.collect()?.scopes.card ?? null, null); }
+});
+
+test('media scopes share page output/read limits and reject incomplete candidate lists', () => {
+  const f = scopedFixture();
+  const nodes = Array(32).fill(f.title);
+  const original = f.document.querySelectorAll;
+  f.document.querySelectorAll = selector => selector === 'h1' ? nodes : original(selector);
+  const access = { ...scopedAccess, selectors: Object.fromEntries(Array.from({ length: 4 }, (_, i) => [`bulk${i}`, capture('h1', 'text', { all: true })])) };
+  assert.deepEqual(f.collect(access).scopes.card.rejected, ['title', 'creator', 'href']);
+  const many = scopedFixture();
+  const originalCard = many.card.querySelectorAll;
+  many.card.querySelectorAll = selector => selector === 'a' ? Array(600).fill(many.creator) : originalCard(selector);
+  const large = structuredClone(scopedAccess);
+  large.mediaScopes.card.selectors.href.all = true;
+  assert.ok(many.collect(large).scopes.card.rejected.includes('href'));
+});
+
+test('scoped work prioritizes the largest player without changing media array order', () => {
+  const neighbor = scopedFixture(), current = scopedFixture();
+  neighbor.video.rect = { x: 0, y: 0, width: 10, height: 10 };
+  current.video.rect = { x: 100, y: 0, width: 400, height: 500 };
+  const query = current.document.querySelectorAll;
+  current.document.querySelectorAll = selector => selector === 'video, audio' ? [neighbor.video, current.video] : query(selector);
+  const neighborQuery = neighbor.card.querySelectorAll;
+  neighbor.card.querySelectorAll = selector => selector === 'a' ? Array(600).fill(neighbor.creator) : neighborQuery(selector);
+  const result = collectActivityV2Snapshot(scopedAccess, current.document).media;
+  assert.equal(result[0].visibleArea, 100);
+  assert.equal(result[1].visibleArea, 200000);
+  assert.equal(result[1].scopes.card.reads.title, 'Reel caption');
+  assert.deepEqual(result[1].scopes.card.rejected, []);
+});

@@ -289,6 +289,12 @@ function baseCard({ id, name, description, category, version, matches, apiVersio
     for (const [name, capture] of Object.entries(pageAccess?.selectors || {})) {
       descriptions.push(`${name}: ${capture.read} from ${capture.selector}`);
     }
+    for (const [name, scope] of Object.entries(pageAccess?.mediaScopes || {})) {
+      descriptions.push(`${name}: single-player container ${scope.container}, up to ${scope.ancestors} ancestors${scope.exclude ? `, stop at ${scope.exclude}` : ''}`);
+      for (const [field, capture] of Object.entries(scope.selectors)) {
+        descriptions.push(`${name}.${field}: ${capture.read}${capture.attribute ? ` ${capture.attribute}` : ''} from ${capture.selector}`);
+      }
+    }
     access.append(element('p', '', descriptions.length ? descriptions.join(' · ') : 'No page reads'));
     content.append(access);
   }

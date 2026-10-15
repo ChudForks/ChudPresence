@@ -38,16 +38,29 @@ const fixture = `<!doctype html><html><head><title>V2 public fixture</title>
     <script>window.fixturePrivate = 'fixture-script-secret';</script>
   </section>
   <a id="public-link" href="https://example.com/watch?access_token=fixture-url-secret#fixture-fragment-secret">Watch</a>
-  <site-shell></site-shell><video width="640" height="360"></video>
+  <site-shell></site-shell>
+  <section id="media-card"><video width="640" height="360"></video>
+    <h2 id="media-title">Scoped public title</h2>
+    <a id="media-link" href="https://example.com/reel/123?token=fixture-media-secret#private">Scoped link</a>
+  </section>
   <script id="site-state" type="application/json">{"catalog":{"title":"Public JSON title","authorization":"fixture-json-secret","nested":{"sessionToken":"fixture-json-session-secret","episode":4}}}</script>
   <script>
     document.cookie = 'fixtureSession=fixture-cookie-secret; Secure; SameSite=Lax';
     localStorage.setItem('fixtureSession', 'fixture-storage-secret');
     document.querySelector('site-shell').attachShadow({mode:'open'}).innerHTML = '<div class="episode-title">Shadow episode</div>';
+    // Native state crosses isolated worlds; page-world property overrides do not.
+    const canvas = document.createElement('canvas'); canvas.width = 640; canvas.height = 360;
+    canvas.getContext('2d').fillRect(0, 0, 640, 360);
+    const video = document.querySelector('video');
+    video.muted = true; video.srcObject = canvas.captureStream(1); video.play();
   </script></body></html>`;
 const pageAccess = {
   url: true,
   media: true,
+  mediaScopes: { card: { container: '#media-card', ancestors: 4, selectors: {
+    title: { selector: '#media-title', read: 'text' },
+    link: { selector: '#media-link', read: 'attribute', attribute: 'href' },
+  } } },
   selectors: {
     title: { selector: '#public-title', read: 'text' },
     summary: { selector: '#public-region', read: 'text' },
@@ -62,6 +75,7 @@ const source = `
   let recorded = false;
   ChudPresence.onUpdate(async snapshot => {
     if (recorded) return;
+    if (!ChudPresence.media.getAll()[0]?.scopes?.card) return;
     recorded = true;
     const absent = [typeof document, typeof window, typeof chrome, typeof browser,
       typeof fetch, typeof XMLHttpRequest, typeof WebSocket, typeof localStorage,
@@ -83,7 +97,7 @@ const source = `
       catalog: ChudPresence.page.read('catalog'),
       info: ChudPresence.page.info(),
       media: ChudPresence.media.getAll(),
-      frozen: Object.isFrozen(snapshot) && Object.isFrozen(snapshot.reads)
+      frozen: Object.isFrozen(snapshot) && Object.isFrozen(snapshot.reads) && Object.isFrozen(snapshot.media[0].scopes.card.reads)
     });
     await ChudPresence.report({kind:'video',media:{title:ChudPresence.page.read('title')},playback:{state:'playing'}});
   });
@@ -232,6 +246,7 @@ try {
   assert.deepEqual(probe.info, { visibilityState: 'visible', origin: fixtureOrigin, pathname: fixturePath });
   assert.equal(probe.media.length, 1);
   assert.equal(typeof probe.media[0].currentTime, 'number');
+  assert.deepEqual(probe.media[0].scopes.card, { reads: { title: 'Scoped public title', link: 'https://example.com/reel/123' }, rejected: [] });
   assert.equal(probe.frozen, true);
   assert.doesNotMatch(JSON.stringify(probe), /fixture-[a-z-]*secret|fixture-navigation-fragment|v2-browser-fixture-extension-private/);
   const status = await until(

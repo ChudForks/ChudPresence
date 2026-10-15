@@ -1,5 +1,76 @@
 # Chromium Activity Lab verification
 
+## Instagram first Reel opened from Home (October 15, 2026)
+
+Instagram **2.0.2** fixes a package metadata issue on the first Reel opened from
+Home and when returning to it. The user supplied a `card-fields-rejected` log
+naming `links`. Live DOM inspection confirmed a hidden audio-control anchor
+alongside its visible duplicate in the selected card, with both marked by an
+`Audio image` SVG label. Broad anchor reads rejected that hidden control and
+prevented reporting. The updated scoped permalink declaration excludes audio
+controls; hidden metadata and hidden Reel permalinks remain rejected normally.
+
+The synthetic browser regression reproduces the old rejection and verifies
+Home -> first Reel -> next -> return in one document/QuickJS guest with the new
+metadata. The corrected selector was also checked against the live card: four
+anchors/one hidden candidate become two anchors/no hidden candidates. Extension
+2.0.2 is sufficient; reimport the updated Instagram package. This does not verify
+the reimported package's report in the user's blocked extension Library.
+
+## Instagram avatar-first creator fix (October 15, 2026)
+
+The initial Instagram 2.0.0 synthetic fixture omitted the empty avatar anchor
+that precedes the visible username anchor on live Reels. Both match the same
+aria-label selector, so creator text was empty and the package always cleared.
+The user's snapshot showed no accepted reports or errors. Before a frame's first
+report, the current manager ignores its clears as stale, so last-clear was also
+empty. The package had no diagnostic logging to distinguish those conditions.
+
+Instagram **2.0.1** narrows creator reads to the username link and adds bounded,
+deduplicated reason logs without page values. Live read-only DOM inspection
+confirmed that the old selector returns empty text while the new selector returns
+the visible username and its matching public profile path. The updated browser
+fixture includes the avatar before the username, reproduces the old clear and
+checks the new report through the actual broker and QuickJS. Avatar-only cards
+still clear. No further extension change is needed; reimport all three updated
+Instagram files. Browser policy blocks the user's extension Library, so its
+installed report and actual Discord publication cannot be verified directly.
+
+## Instagram Reels and bounded media scopes (October 15, 2026)
+
+Extension **2.0.2** adds optional `pageAccess.mediaScopes`, binding sanitized
+card metadata to its own native player without exposing DOM handles or page
+execution. It retains existing public-field filters and shared capture/read/
+output budgets. New aggregate limits bound scoped candidate selection, ancestor
+steps and card/shadow discovery. Hidden/sensitive fields, invalid first matches,
+ambiguous native/shadow players, app roots, outside nodes and exhausted budgets
+fail closed. Existing V1 and unscoped V2 snapshots retain their contracts.
+
+The independent V2 repository adds Instagram **2.0.0**, requiring extension
+2.0.2, with the archived Reels-only presence: caption, @creator, native progress,
+static Instagram logo and public Reel/Profile buttons. Default and article
+layouts use declared scopes; all selection and formatting stay in the package.
+
+`npm run check` and all **314 extension tests** passed. The V2 repository passed
+build/check, **43 tests**, version checks, production QuickJS integration, and
+browser fixtures for Prime Video, Google and Instagram. Instagram's fixture
+passes deep nested cards, paused main player beside smaller autoplay, invalid
+winner clearing, missing-caption fallback, clean/matching URLs, article/detail
+routes, hidden/sensitive fields, native/shadow-player ambiguity and visibility
+cleanup. Its reports pass through the real presence and Discord payload builders,
+including timing and artwork/button/progress preferences.
+
+The actual unpacked-extension `npm run test:v2-browser` passed on **Microsoft
+Edge 155.0.4283.45** using a disposable profile. Its native canvas media stream
+supplies real playback state across isolated worlds; scoped sanitized reads
+reach the guest as deeply frozen JSON. Credential isolation, strict CSP,
+resource failures, teardown and navigation-grace checks also pass. No browser
+permissions, network authority or guest bridge operations were added.
+
+These checks use synthetic HTTPS responses. Signed-in Instagram layout
+compatibility and actual Discord publishing have not been checked. Reload the
+2.0.2 extension and reimport all three Instagram package files for a live check.
+
 ## Google navigation smoothing (October 15, 2026)
 
 Extension **2.0.1** adds the V2 metadata preference
