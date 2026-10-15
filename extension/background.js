@@ -1,14 +1,21 @@
 import { selectActivity } from './core/activity.js';
 import { ActivityRegistry } from './core/activity-registry.js';
 import { ActivityManager, sanitizeDiagnosticValue } from './core/activity-manager.js';
-import { shouldInvalidateActivityTab } from './core/tab-lifecycle.js';
+import { registerActivityRestoreHandlers } from './core/activity-restore.js';
+import {
+  ensureBundledYouTubeInstalled,
+  rememberBundledYouTubeRemoval,
+} from './core/default-activity.js';
+import { shouldInvalidateActivityTab, shouldRetireActivityTab } from './core/tab-lifecycle.js';
 import { createPresenceIntent } from './core/presence.js';
+import { createPresenceClearDelay } from './core/presence-clear-delay.js';
 import {
   applicationIdForPresence,
   DEFAULT_SETTINGS,
   isTrackAllowed,
   LEGACY_APPLICATION_ID_SETTINGS,
   LEGACY_DETAIL_SETTINGS,
+  RETIRED_PROVIDER_SETTINGS,
   normalizeSettings,
   presenceDetailsForTrack,
 } from './core/settings.js';
@@ -16,49 +23,102 @@ import { presencePublisher } from './platform/presence-publisher.js';
 import { EXTENSION_NAME } from './core/branding.js';
 
 const activityRegistry = new ActivityRegistry();
+const navigationClears = new Map();
 const ACTIVITY_PRUNE_ALARM = 'activity-prune-stale';
 const activityManager = new ActivityManager({
   onReport({ tabId, documentId, frameId, track }) {
+    cancelNavigationClears(null, tabId, null, frameId);
     activityRegistry.update(tabId, documentId, track, frameId);
     schedulePublish();
   },
-  onClear(activityId, tabId, documentId, frameId) {
+  onClear(activityId, tabId, documentId, frameId, { closing = false, navigationGraceMs = 0 } = {}) {
+    if (closing && navigationGraceMs > 0 && deferNavigationClear(activityId, tabId, documentId, frameId, navigationGraceMs)) return;
+    cancelNavigationClears(activityId, tabId, documentId, frameId);
     const known = activityRegistry.clearActivity(activityId, tabId, documentId, frameId);
     if (!known) return;
     if (typeof tabId === 'number') clearActiveTab(tabId);
-    schedulePublish();
+    if (closing) publishCurrentActivity({ closing: true });
+    else schedulePublish();
   },
 });
+let defaultInstallPromise = null;
+function ensureDefaultYouTube() {
+  if (defaultInstallPromise) return defaultInstallPromise;
+  defaultInstallPromise = ensureBundledYouTubeInstalled({
+    manager: activityManager,
+    storage: chrome.storage.local,
+    api: chrome,
+  }).finally(() => { defaultInstallPromise = null; });
+  return defaultInstallPromise;
+}
 let activeTabId = null;
 let settings = { ...DEFAULT_SETTINGS };
 let delivery = presencePublisher.status();
 let pushTimer = 0;
+const transientClear = createPresenceClearDelay(() => publishCurrentActivity());
 
-chrome.runtime.onInstalled.addListener(async () => {
-  const stored = await chrome.storage.local.get(null);
-  await chrome.storage.local.set(normalizeSettings(stored));
-  await chrome.storage.local.remove([
-    'bridgeUrl',
-    'discordClientId',
-    ...LEGACY_APPLICATION_ID_SETTINGS,
-    ...LEGACY_DETAIL_SETTINGS,
-  ]);
-  // Chrome clears registered user scripts on an extension update.
-  await activityManager.restoreAll();
+registerActivityRestoreHandlers({
+  runtime: chrome.runtime,
+  manager: activityManager,
+  afterInstallRestore: ensureDefaultYouTube,
+  beforeInstallRestore: async () => {
+    const stored = await chrome.storage.local.get(null);
+    await chrome.storage.local.set(normalizeSettings(stored));
+    await chrome.storage.local.remove([
+      'bridgeUrl',
+      'discordClientId',
+      ...LEGACY_APPLICATION_ID_SETTINGS,
+      ...LEGACY_DETAIL_SETTINGS,
+      ...RETIRED_PROVIDER_SETTINGS,
+    ]);
+    // Chrome clears registered user scripts on an extension update.
+  },
 });
 
 async function loadSettings() {
   settings = normalizeSettings(await chrome.storage.local.get(null));
+  if (!settings.enabled) discardNavigationClears();
+}
+
+function cancelNavigationClears(activityId = null, tabId = null, documentId = null, frameId = null) {
+  for (const [key, pending] of navigationClears) {
+    if (activityId !== null && pending.activityId !== activityId ||
+        typeof tabId === 'number' && pending.tabId !== tabId ||
+        documentId !== null && documentId !== undefined && pending.documentId !== documentId ||
+        Number.isInteger(frameId) && pending.frameId !== frameId) continue;
+    clearTimeout(pending.timer);
+    navigationClears.delete(key);
+  }
+}
+
+function discardNavigationClears() {
+  for (const pending of navigationClears.values()) {
+    activityRegistry.clearActivity(pending.activityId, pending.tabId, pending.documentId, pending.frameId);
+  }
+  cancelNavigationClears();
+}
+
+function deferNavigationClear(activityId, tabId, documentId, frameId, graceMs) {
+  if (!activityRegistry.hasActivity(activityId, tabId, documentId, frameId)) return false;
+  const key = JSON.stringify([activityId, tabId, documentId, frameId]);
+  if (navigationClears.has(key)) return true; // Repeated signals cannot extend the deadline.
+  const pending = { activityId, tabId, documentId, frameId };
+  pending.timer = setTimeout(() => {
+    navigationClears.delete(key);
+    // clearDocument checks ownership, so an expired old document cannot erase
+    // a newer report. The grace has already elapsed; do not add another delay.
+    onDocumentGone(tabId, documentId, { closing: true, frameId });
+  }, Math.min(5000, graceMs));
+  navigationClears.set(key, pending);
+  return true;
 }
 
 function currentTrack() {
-  const eligible = new Map(
-    [...activityRegistry.tracks()].filter(([, track]) => isTrackAllowed(
-      track,
-      settings,
-      track?.activityId ? activityManager.preferencesFor(track.activityId) : null,
-    )),
-  );
+  const eligible = activityRegistry.tracks((track) => isTrackAllowed(
+    track,
+    settings,
+    track?.activityId ? activityManager.preferencesFor(track.activityId) : null,
+  ));
   const selected = selectActivity(eligible, activeTabId);
   activeTabId = selected.tabId;
   return selected.track;
@@ -97,10 +157,15 @@ function setAction(track) {
   chrome.action.setTitle({ title: title ? `${title}${suffix}` : EXTENSION_NAME });
 }
 
-async function publishCurrentActivity({ closing = false } = {}) {
+async function publishCurrentActivity({ closing = false, delayClear = false } = {}) {
   const track = currentTrack();
   setAction(track);
   const intent = localPresenceIntent(track);
+  if (!intent && delayClear && !closing) {
+    transientClear.defer();
+    return;
+  }
+  transientClear.cancel();
   const applicationId = applicationIdForPresence();
   delivery = await presencePublisher.publish(intent, applicationId, { closing });
 }
@@ -120,7 +185,7 @@ function schedulePublish() {
   if (pushTimer) return;
   pushTimer = setTimeout(() => {
     pushTimer = 0;
-    publishCurrentActivity();
+    publishCurrentActivity({ delayClear: true });
   }, 250);
 }
 
@@ -141,14 +206,15 @@ function pingRemaining() {
   }
 }
 
-function onTabGone(tabId, { closing = false } = {}) {
+function onTabGone(tabId, { closing = false, retireDocuments = true, removed = false } = {}) {
   if (typeof tabId !== 'number') return;
-  activityManager.invalidateTab(tabId).catch(() => {});
+  cancelNavigationClears(null, tabId);
+  activityManager.invalidateTab(tabId, { retireDocuments, removed }).catch(() => {});
   const known = activityRegistry.clearTab(tabId);
   clearActiveTab(tabId);
   if (!known) return;
   pingRemaining();
-  publishCurrentActivity({ closing });
+  publishCurrentActivity({ closing, delayClear: !closing });
 }
 
 function onDocumentGone(tabId, documentId, { closing = false, frameId = null } = {}) {
@@ -157,11 +223,12 @@ function onDocumentGone(tabId, documentId, { closing = false, frameId = null } =
   if (!known) return;
   clearActiveTab(tabId);
   pingRemaining();
-  publishCurrentActivity({ closing });
+  publishCurrentActivity({ closing, delayClear: !closing });
 }
 
 async function handleActivityLibraryMessage(message) {
   if (message.type === 'ACTIVITY_LIBRARY_STATE') {
+    await ensureDefaultYouTube().catch(() => {});
     const state = await activityManager.status();
     const track = currentTrack();
     return {
@@ -176,8 +243,12 @@ async function handleActivityLibraryMessage(message) {
     return result;
   }
   if (message.type === 'ACTIVITY_REMOVE') {
+    await defaultInstallPromise?.catch(() => {});
     const removed = await activityManager.remove(message.id);
-    schedulePublish();
+    if (removed && message.id === 'youtube') {
+      await rememberBundledYouTubeRemoval(chrome.storage.local);
+    }
+    publishCurrentActivity();
     return { removed };
   }
   if (message.type === 'ACTIVITY_RELOAD') {
@@ -187,16 +258,22 @@ async function handleActivityLibraryMessage(message) {
   }
   if (message.type === 'ACTIVITY_SET_ENABLED') {
     const result = await activityManager.setEnabled(message.id, Boolean(message.enabled));
-    schedulePublish();
+    publishCurrentActivity();
     return result;
   }
   if (message.type === 'ACTIVITY_SET_PREFERENCES') {
     const result = await activityManager.setPreferences(message.id, message.preferences);
-    schedulePublish();
+    publishCurrentActivity();
     return result;
   }
   if (message.type === 'ACTIVITY_SET_SETTING') {
     return activityManager.setActivitySetting(message.id, message.settingId, message.value);
+  }
+  if (message.type === 'ACTIVITY_CLEAR_DIAGNOSTICS') {
+    if (Object.hasOwn(message, 'id') && message.id !== null && typeof message.id !== 'string') {
+      throw new TypeError('A valid Activity ID is required to clear its diagnostics.');
+    }
+    return activityManager.clearDiagnostics(message.id ?? null);
   }
   if (message.type === 'ACTIVITY_RESTORE') return activityManager.restoreAll();
   return null;
@@ -262,6 +339,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'ACTIVITY_SET_ENABLED',
     'ACTIVITY_SET_PREFERENCES',
     'ACTIVITY_SET_SETTING',
+    'ACTIVITY_CLEAR_DIAGNOSTICS',
     'ACTIVITY_RESTORE',
   ].includes(message?.type);
   if (libraryMessage) {
@@ -339,6 +417,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message?.type === 'SET_ENABLED') {
     settings.enabled = Boolean(message.enabled);
+    if (!settings.enabled) discardNavigationClears();
     chrome.storage.local.set({ enabled: settings.enabled });
     publishCurrentActivity()
       .then(() => sendResponse({ ok: true, settings }))
@@ -364,16 +443,25 @@ chrome.runtime.onConnect.addListener((port) => {
         if (!tab || tab.discarded) onTabGone(tabId, { closing: true });
         else onDocumentGone(tabId, documentId, { frameId });
       })
-      .catch(() => onTabGone(tabId, { closing: true }));
+      .catch(() => onTabGone(tabId, { closing: true, removed: true }));
   });
 });
 
-chrome.tabs.onRemoved.addListener((tabId) => onTabGone(tabId, { closing: true }));
+chrome.tabs.onRemoved.addListener((tabId) => onTabGone(tabId, { closing: true, removed: true }));
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  // A History API URL update keeps the current document and user-script world.
-  // Retiring it here makes its next report fail with stale_document.
-  if (shouldInvalidateActivityTab(changeInfo)) onTabGone(tabId);
+  // A loading update can accompany a player or route change in the same
+  // document. Its report remains valid until that document ends or is replaced.
+  if (shouldInvalidateActivityTab(changeInfo)) {
+    onTabGone(tabId, { retireDocuments: shouldRetireActivityTab(changeInfo) });
+  }
+  if (changeInfo?.url) {
+    // A same-document SPA route can enter an Activity's match pattern without
+    // giving Chrome a new document in which to run the registered user script.
+    // Run this even alongside a loading update: Hulu can report its route
+    // transition that way while retaining the document that needs injection.
+    activityManager.injectMatchingTab(tabId, changeInfo.url).catch(() => {});
+  }
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -394,10 +482,6 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   });
 });
 
-chrome.runtime.onStartup.addListener(() => {
-  activityManager.restoreAll().catch(() => {});
-});
-
 chrome.permissions?.onRemoved?.addListener(() => {
   activityManager.restoreAll().catch(() => {});
 });
@@ -405,7 +489,7 @@ chrome.permissions?.onRemoved?.addListener(() => {
 chrome.permissions?.onAdded?.addListener(() => {
   registerUserScriptMessageListener();
   registerUserScriptConnectListener();
-  activityManager.restoreAll().catch(() => {});
+  activityManager.restoreAll().then(ensureDefaultYouTube).catch(() => {});
 });
 
 chrome.alarms.create(ACTIVITY_PRUNE_ALARM, { delayInMinutes: 0.5, periodInMinutes: 0.5 });
@@ -414,7 +498,7 @@ chrome.alarms.create(ACTIVITY_PRUNE_ALARM, { delayInMinutes: 0.5, periodInMinute
 // independently of Discord initialization so a network/auth failure cannot
 // prevent installed Activities from resuming.
 loadSettings().catch(() => {});
-activityManager.restoreAll().catch(() => {});
+activityManager.restoreAll().then(ensureDefaultYouTube).catch(() => {});
 presencePublisher.initialize().then(() => {
   delivery = presencePublisher.status();
 }).catch(() => {});

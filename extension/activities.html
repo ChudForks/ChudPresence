@@ -18,21 +18,21 @@
 
     <main class="shell">
       <section class="hero">
-        <div><span class="eyebrow">Community extensions for ChudPresence</span><h1>Activity Library</h1>
-          <p>Install small, isolated website observers. ChudPresence keeps control of your Discord presence.</p>
+        <div><h1>Activity Library</h1>
+          <p>Find and manage activities for the sites you use.</p>
         </div>
         <button class="button secondary" id="refresh-catalog" type="button">Refresh catalog</button>
       </section>
 
-      <nav class="tabs" aria-label="Activity Library sections">
-        <button class="tab is-active" data-view="discover" type="button">Discover</button>
-        <button class="tab" data-view="installed" type="button">Installed <span id="installed-count">0</span></button>
-        <button class="tab" data-view="updates" type="button">Updates <span id="update-count">0</span></button>
-        <button class="tab" data-view="developer" type="button">Developer</button>
+      <nav class="tabs" role="tablist" aria-label="Activity Library sections">
+        <button class="tab is-active" id="tab-discover" role="tab" aria-selected="true" aria-controls="discover-view" data-view="discover" type="button">Discover</button>
+        <button class="tab" id="tab-installed" role="tab" aria-selected="false" aria-controls="installed-view" tabindex="-1" data-view="installed" type="button">Installed <span id="installed-count">0</span></button>
+        <button class="tab" id="tab-updates" role="tab" aria-selected="false" aria-controls="updates-view" tabindex="-1" data-view="updates" type="button">Updates <span id="update-count">0</span></button>
+        <button class="tab" id="tab-developer" role="tab" aria-selected="false" aria-controls="developer-view" tabindex="-1" data-view="developer" type="button">Developer</button>
       </nav>
 
-      <section class="view" id="discover-view" aria-labelledby="discover-title">
-        <div class="view-heading"><div><span class="eyebrow">Browse</span><h2 id="discover-title">Discover Activities</h2></div><span class="muted" id="catalog-age"></span></div>
+      <section class="view" id="discover-view" role="tabpanel" aria-labelledby="tab-discover" tabindex="0">
+        <div class="view-heading"><h2 id="discover-title">Discover</h2><span class="muted" id="catalog-age"></span></div>
         <div class="filters">
           <label class="search"><span class="visually-hidden">Search Activities</span><input id="search" type="search" placeholder="Search Activities…" autocomplete="off" /></label>
           <label class="category-filter"><span class="visually-hidden">Filter by category</span><select id="category-filter"><option value="all">All categories</option></select></label>
@@ -41,20 +41,36 @@
         <div class="card-grid" id="discover-list"></div>
       </section>
 
-      <section class="view" id="installed-view" aria-labelledby="installed-title" hidden>
-        <div class="view-heading"><div><span class="eyebrow">On this browser</span><h2 id="installed-title">Installed Activities</h2></div></div>
+      <section class="view" id="installed-view" role="tabpanel" aria-labelledby="tab-installed" tabindex="0" hidden>
+        <div class="view-heading"><h2 id="installed-title">Installed</h2></div>
         <div class="card-grid" id="installed-list"></div>
       </section>
 
-      <section class="view" id="updates-view" aria-labelledby="updates-title" hidden>
-        <div class="view-heading"><div><span class="eyebrow">Manual updates</span><h2 id="updates-title">Updates</h2></div></div>
+      <section class="view" id="updates-view" role="tabpanel" aria-labelledby="tab-updates" tabindex="0" hidden>
+        <div class="view-heading"><h2 id="updates-title">Updates</h2></div>
         <div class="card-grid" id="updates-list"></div>
       </section>
 
-      <section class="view" id="developer-view" aria-labelledby="developer-title" hidden>
-        <div class="view-heading"><div><span class="eyebrow">For Activity authors</span><h2 id="developer-title">Developer Mode</h2></div></div>
-        <label class="developer-toggle"><span><strong>Enable developer tools</strong><small>Show local Activity loading controls on this browser.</small></span><input id="developer-enabled" type="checkbox" /></label>
+      <section class="view" id="developer-view" role="tabpanel" aria-labelledby="tab-developer" tabindex="0" hidden>
+        <div class="view-heading"><h2 id="developer-title">Developer Mode</h2></div>
+        <label class="developer-toggle"><span><strong>Enable developer tools</strong><small>Show Activity logs and local package loading on this browser.</small></span><input id="developer-enabled" type="checkbox" /></label>
         <div class="developer-panel" id="developer-panel" hidden>
+          <section class="developer-console" aria-labelledby="developer-logs-title">
+            <div class="console-heading"><div><h3 id="developer-logs-title">Activity logs</h3><p>Choose an Activity to inspect its logs, network requests, and playback diagnostics.</p></div><span class="console-count" id="developer-log-count">0 entries</span></div>
+            <div class="console-filters">
+              <label>Activity<select id="developer-log-activity"><option value="">All Activities</option></select></label>
+              <label>Show<select id="developer-log-kind"><option value="all">All diagnostics</option><option value="logs">Activity logs</option><option value="network">Network requests</option><option value="snapshots">Playback &amp; runtime</option></select></label>
+              <label>Log level<select id="developer-log-level"><option value="all">All levels</option><option value="debug">Debug</option><option value="info">Info</option><option value="warn">Warnings</option><option value="error">Errors</option></select></label>
+            </div>
+            <div class="console-toolbar">
+              <div class="console-actions"><button class="button primary" id="developer-copy-logs" type="button">Copy visible</button><button class="button secondary" id="developer-select-logs" type="button">Select all</button><button class="button secondary" id="developer-clear-logs" type="button">Clear all history</button></div>
+              <label class="console-pause"><input id="developer-pause-logs" type="checkbox" />Pause updates</label>
+            </div>
+            <textarea class="console-output" id="developer-log-output" aria-label="Activity diagnostic logs" readonly spellcheck="false" wrap="off" rows="20">No diagnostic history yet.</textarea>
+            <div class="console-footer"><span class="muted" id="developer-log-update">Updates every 3 seconds. Selecting text holds the view.</span><span class="console-feedback" id="developer-log-status" role="status" aria-live="polite"></span></div>
+            <p class="console-help">Clear history starts a fresh testing session for the selected Activity. New entries continue to arrive while playback runs.</p>
+          </section>
+          <h3>Load a local Activity</h3>
           <p>Select an Activity's <code>metadata.json</code> and <code>activity.js</code> together. Add <code>icon.png</code> if its metadata declares an icon. Set metadata <code>frames</code> to <code>all</code> to run the same bundled script in every matching frame; <code>ChudPresence.runtime.frame.isTop</code> identifies the top page. Local Activities stay on this device.</p>
           <label class="file-picker">Activity files<input id="local-files" type="file" accept=".json,.js,.png,application/json,text/javascript,image/png" multiple /></label>
           <div class="selected-files" id="selected-files">Choose both required files to continue.</div>
@@ -62,8 +78,11 @@
           <div class="notice" id="developer-notice" role="status"></div>
         </div>
         <div class="developer-guide">
+          <h3>Activity API v2</h3>
+          <p>Use <code>apiVersion: 2</code> for programmable Activities that run inside a sandbox. Declare the page fields you need in <code>pageAccess</code>, then combine their snapshots with JavaScript in <code>ChudPresence.onUpdate()</code>. V2 supports public DOM and JSON reads, open shadow roots, media state, selected query parameters, scoped storage, and declared network requests.</p>
+          <a href="ACTIVITY_API_V2.md" target="_blank" rel="noopener">Read the sandboxed Activity API v2 guide</a>
           <h3>Activity API v1</h3>
-          <p>Scripts run in an isolated Chromium <code>USER_SCRIPT</code> world. Chrome 138 and newer may require <strong>Allow User Scripts</strong> on this extension’s details page. An Activity may report from the top page or, when configured, matching embedded frames. Developer Mode shows reports, final local presence intent, settings, granted origins, frame and document lifecycles, recent logs and network requests. Use Reload Activity to rerun the current package in its active documents.</p>
+          <p>Scripts run in an isolated Chromium <code>USER_SCRIPT</code> world. Chrome 138 and newer may require <strong>Allow User Scripts</strong> on this extension’s details page. An Activity may report from the top page or, when configured, matching embedded frames. Use Activity logs above to filter, copy, and clear diagnostic history. Installed cards also offer View logs and Reload Activity.</p>
           <pre><code>ChudPresence.report({
   kind: "episode",
   media: {

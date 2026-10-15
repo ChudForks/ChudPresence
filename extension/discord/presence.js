@@ -10,10 +10,11 @@ import {
   revokeAuthorization,
 } from './auth.js';
 import { buildHeadlessActivity } from './activity-builder.js';
-import { armShutdownCleanup, disarmShutdownCleanup } from './shutdown-cleanup.js';
+import { armShutdownCleanup, disarmShutdownCleanup, onShutdownCleanup } from './shutdown-cleanup.js';
 
 const SESSION_STORAGE_KEY = 'discordHeadlessSession';
 const LAST_INTENT_STORAGE_KEY = 'discordLastIntent';
+const CLEANUP_DIAGNOSTIC_STORAGE_KEY = 'discordCleanupDiagnostic';
 export const RENEW_ALARM = 'discord-presence-renew';
 const ABSOLUTE_MIN_UPDATE_INTERVAL_MS = 4_200;
 const MIN_UPDATE_INTERVAL_MS = 12_000;
@@ -28,14 +29,32 @@ let rateLimitTimer = 0;
 let scheduledRateLimitUntil = 0;
 let pendingIntent = null;
 let pendingApplicationId = '';
+let updateTimer = 0;
+let scheduledUpdateAt = 0;
+let pendingUpdate = null;
+let pendingUpdateApplicationId = '';
 let initialized = false;
+let initializationPromise = null;
 let writeQueue = Promise.resolve();
+let shutdownCleanup = { state: 'not-armed', reason: '' };
+let lastCleanupAttempt = null;
 let currentStatus = {
   id: 'discord-headless',
   available: false,
   state: 'starting',
   message: 'Starting the experimental Discord transport…',
 };
+
+function recordCleanupAttempt(state, source = 'worker', httpStatus = null) {
+  lastCleanupAttempt = {
+    state, source, timestamp: Date.now(),
+    httpStatus: Number.isInteger(httpStatus) && httpStatus >= 100 && httpStatus <= 599 ? httpStatus : null,
+  };
+  // Diagnostics must never delay or prevent the request during shutdown.
+  void chrome.storage.local.set({ [CLEANUP_DIAGNOSTIC_STORAGE_KEY]: lastCleanupAttempt }).catch(() => {});
+}
+
+onShutdownCleanup(({ state, httpStatus }) => recordCleanupAttempt(state, 'document', httpStatus));
 
 function setStatus(state, message, available = false) {
   currentStatus = {
@@ -44,6 +63,8 @@ function setStatus(state, message, available = false) {
     state,
     message,
     ...getAuthState(),
+    shutdownCleanup,
+    lastCleanupAttempt,
   };
   return currentStatus;
 }
@@ -60,11 +81,46 @@ function refreshIdleStatus() {
 }
 
 function clearPendingRetry() {
+  if (updateTimer) clearTimeout(updateTimer);
+  updateTimer = 0;
+  scheduledUpdateAt = 0;
+  pendingUpdate = null;
+  pendingUpdateApplicationId = '';
   pendingIntent = null;
   pendingApplicationId = '';
   if (rateLimitTimer) clearTimeout(rateLimitTimer);
   rateLimitTimer = 0;
   scheduledRateLimitUntil = 0;
+}
+
+function scheduleUpdate(intent, applicationId, delayMs) {
+  pendingUpdate = intent;
+  pendingUpdateApplicationId = applicationId || '';
+  const updateAt = Date.now() + delayMs;
+  if (updateTimer && scheduledUpdateAt <= updateAt) return;
+  if (updateTimer) clearTimeout(updateTimer);
+  scheduledUpdateAt = updateAt;
+  updateTimer = setTimeout(() => {
+    updateTimer = 0;
+    scheduledUpdateAt = 0;
+    const next = pendingUpdate;
+    const nextApplicationId = pendingUpdateApplicationId;
+    pendingUpdate = null;
+    pendingUpdateApplicationId = '';
+    if (!next || !getAuthState().authenticated) return;
+    enqueue(() => updateSession(next, nextApplicationId))
+      .then((result) => { currentStatus = result; })
+      .catch((error) => { currentStatus = handleDeliveryError(error, next, nextApplicationId); });
+  }, delayMs);
+}
+
+function timingChanged(intent) {
+  return ['start', 'end'].some((field) => {
+    const previous = lastIntent?.timestamps?.[field];
+    const next = intent.timestamps?.[field];
+    return (previous == null) !== (next == null) ||
+      (previous != null && next != null && Math.abs(next - previous) >= 3);
+  });
 }
 
 function retryDelayMessage(delayMs) {
@@ -133,8 +189,24 @@ async function saveLastIntent() {
 
 async function armCurrentShutdownCleanup() {
   if (!sessionToken || !getAuthState().authenticated) return false;
-  const accessToken = await getAccessToken();
-  return armShutdownCleanup(accessToken, sessionToken);
+  let accessToken;
+  try {
+    accessToken = await getAccessToken();
+  } catch {
+    shutdownCleanup = { state: 'unavailable', reason: 'authentication' };
+    return false;
+  }
+  try {
+    const result = await armShutdownCleanup(accessToken, sessionToken);
+    shutdownCleanup = {
+      state: !result.armed ? 'unavailable' : result.deferred ? 'deferred' : 'exit-fallback',
+      reason: result.reason,
+    };
+    return result.armed;
+  } catch {
+    shutdownCleanup = { state: 'unavailable', reason: 'document' };
+    return false;
+  }
 }
 
 async function updateSession(intent, applicationId, force = false) {
@@ -146,8 +218,12 @@ async function updateSession(intent, applicationId, force = false) {
   if (!activity) return clearSession();
 
   const identity = activityIdentity(activity);
-  if (!force && Date.now() - lastSentAt < ABSOLUTE_MIN_UPDATE_INTERVAL_MS) return currentStatus;
-  if (!force && identity === lastActivityIdentity && Date.now() - lastSentAt < MIN_UPDATE_INTERVAL_MS) {
+  const interval = identity === lastActivityIdentity && !timingChanged(intent)
+    ? MIN_UPDATE_INTERVAL_MS : ABSOLUTE_MIN_UPDATE_INTERVAL_MS;
+  const remaining = interval - (Date.now() - lastSentAt);
+  if (!force && remaining > 0) {
+    // Keep the latest correction even if a background tab has no further events.
+    scheduleUpdate(intent, applicationId, remaining);
     return currentStatus;
   }
 
@@ -161,8 +237,9 @@ async function updateSession(intent, applicationId, force = false) {
     });
   } catch (error) {
     if (!body.token || error instanceof DiscordRateLimitError) throw error;
-    sessionToken = '';
-    await saveSession();
+    // An update error does not prove the existing session is gone. Delete it
+    // successfully before creating a replacement that would lose its token.
+    await clearSession();
     result = await discordRequest('/users/@me/headless-sessions', {
       method: 'POST',
       body: JSON.stringify({ activities: [activity] }),
@@ -191,20 +268,34 @@ async function clearSession({ keepalive = false } = {}) {
   lastActivityIdentity = '';
   lastSentAt = 0;
   const token = sessionToken;
-  sessionToken = '';
-  await Promise.all([saveSession(), saveLastIntent()]);
-
-  if (token && getAuthState().authenticated) {
-    await discordRequest('/users/@me/headless-sessions/delete', {
+  if (token) recordCleanupAttempt('started');
+  // Start the network request before waiting on storage: browser-close
+  // callbacks may have only a short time left in their initiating context.
+  const deletion = !token ? Promise.resolve() : !getAuthState().authenticated
+    ? Promise.reject(new Error('Connect Discord to finish deleting the previous presence session.'))
+    : discordRequest('/users/@me/headless-sessions/delete', {
       method: 'POST',
       // Firefox 133+ can keep this authenticated request alive after the last
       // source document starts closing. It is deliberately limited to cleanup:
       // normal presence writes should not outlive their initiating context.
       keepalive,
       body: JSON.stringify({ token }),
-    }).catch(() => {});
+    });
+  const confirmedDeletion = deletion.then(() => {
+    if (token) recordCleanupAttempt('confirmed');
+  }, (error) => {
+    if (token) recordCleanupAttempt('failed', 'worker', error?.status);
+    throw error;
+  });
+  await Promise.all([confirmedDeletion, saveLastIntent()]);
+  if (token) {
+    // Keep the token persisted and shutdown cleanup armed until Discord
+    // confirms deletion, so a failed request can be retried after a restart.
+    sessionToken = '';
+    await saveSession();
   }
   await disarmShutdownCleanup().catch(() => {});
+  shutdownCleanup = { state: 'not-armed', reason: '' };
   return refreshIdleStatus();
 }
 
@@ -213,30 +304,47 @@ function enqueue(operation) {
   return writeQueue;
 }
 
+async function loadPersistedSession() {
+  await initializeAuth();
+  const stored = await chrome.storage.local.get([SESSION_STORAGE_KEY, CLEANUP_DIAGNOSTIC_STORAGE_KEY]);
+  const transient = await chrome.storage.session.get(LAST_INTENT_STORAGE_KEY);
+  sessionToken = String(stored[SESSION_STORAGE_KEY] || '');
+  const savedCleanup = stored[CLEANUP_DIAGNOSTIC_STORAGE_KEY];
+  if (savedCleanup && ['started', 'confirmed', 'failed'].includes(savedCleanup.state)) {
+    lastCleanupAttempt = {
+      state: savedCleanup.state,
+      source: savedCleanup.source === 'document' ? 'document' : 'worker',
+      timestamp: Number(savedCleanup.timestamp) || 0,
+      httpStatus: Number.isInteger(savedCleanup.httpStatus) ? savedCleanup.httpStatus : null,
+    };
+  }
+  const savedPresence = transient[LAST_INTENT_STORAGE_KEY] || null;
+  if (savedPresence?.intent) {
+    lastIntent = savedPresence.intent;
+    lastApplicationId = String(savedPresence.applicationId || '');
+  } else {
+    // Migrate the pre-service-profile session shape.
+    lastIntent = savedPresence;
+    lastApplicationId = '';
+  }
+  await chrome.alarms.create(RENEW_ALARM, { periodInMinutes: 10 });
+  await armCurrentShutdownCleanup().catch(() => false);
+  initialized = true;
+  return refreshIdleStatus();
+}
+
 export const discordPresence = Object.freeze({
   async initialize() {
+    if (initializationPromise) return initializationPromise;
     if (initialized) return currentStatus;
-    await initializeAuth();
-    const stored = await chrome.storage.local.get(SESSION_STORAGE_KEY);
-    const transient = await chrome.storage.session.get(LAST_INTENT_STORAGE_KEY);
-    sessionToken = String(stored[SESSION_STORAGE_KEY] || '');
-    const savedPresence = transient[LAST_INTENT_STORAGE_KEY] || null;
-    if (savedPresence?.intent) {
-      lastIntent = savedPresence.intent;
-      lastApplicationId = String(savedPresence.applicationId || '');
-    } else {
-      // Migrate the pre-service-profile session shape.
-      lastIntent = savedPresence;
-      lastApplicationId = '';
-    }
-    await chrome.alarms.create(RENEW_ALARM, { periodInMinutes: 10 });
-    initialized = true;
-    await armCurrentShutdownCleanup().catch(() => false);
-    return refreshIdleStatus();
+    initializationPromise = loadPersistedSession().finally(() => {
+      initializationPromise = null;
+    });
+    return initializationPromise;
   },
 
   status() {
-    return currentStatus;
+    return { ...currentStatus, shutdownCleanup, lastCleanupAttempt };
   },
 
   async connect() {
@@ -253,9 +361,13 @@ export const discordPresence = Object.freeze({
 
   async disconnect() {
     await this.initialize();
-    await enqueue(clearSession);
-    await revokeAuthorization();
-    return refreshIdleStatus();
+    return enqueue(async () => {
+      await clearSession();
+      // Keep revocation in the same queue as presence writes. Otherwise a
+      // concurrent publish can create a session with credentials about to go.
+      await revokeAuthorization();
+      return refreshIdleStatus();
+    });
   },
 
   async publish(intent, applicationId = '', { closing = false } = {}) {
@@ -273,9 +385,12 @@ export const discordPresence = Object.freeze({
 
   async renew() {
     await this.initialize();
-    if (!lastIntent || !getAuthState().authenticated) return refreshIdleStatus();
     try {
-      return await enqueue(() => updateSession(lastIntent, lastApplicationId, true));
+      return await enqueue(() => {
+        if (!getAuthState().authenticated) return refreshIdleStatus();
+        if (!lastIntent) return clearSession();
+        return updateSession(lastIntent, lastApplicationId, true);
+      });
     } catch (error) {
       return handleDeliveryError(error, lastIntent, lastApplicationId);
     }

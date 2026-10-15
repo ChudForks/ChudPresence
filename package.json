@@ -1,13 +1,21 @@
 {
   "name": "chudpresence-solo-extension",
-  "version": "1.9.0",
+  "version": "2.0.4",
   "private": true,
   "type": "module",
-  "description": "Local Chromium MV3 Activity API V1 lab for ChudPresence Solo.",
+  "description": "Local Chromium MV3 sandboxed Activity API V2 lab for ChudPresence Solo, retaining V1 compatibility.",
   "scripts": {
-    "check": "node scripts/check.mjs",
+    "check": "node scripts/check.mjs && node scripts/build-v2-engine.mjs --check",
     "test": "node --test test/*.test.js",
-    "build": "node scripts/build.mjs"
+    "test:v2-browser": "node scripts/test-v2-browser.mjs",
+    "build": "node scripts/build.mjs",
+    "build:v2-engine": "node scripts/build-v2-engine.mjs"
   },
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12",
+    "quickjs-emscripten": "0.32.0"
+  }
 }

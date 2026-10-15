@@ -9,6 +9,7 @@ import {
 } from './activity-validator.js';
 import { ACTIVITY_KIND_VALUES } from './activity-contract.generated.js';
 import { MAX_ACTIVITY_ICON_BYTES, MAX_ACTIVITY_METADATA_BYTES } from './activity-contract.generated.js';
+import { validateActivityV2PageAccess } from './activity-v2-page.js';
 
 export const ACTIVITY_REPOSITORY = Object.freeze({
   owner: 'ChudForks',
@@ -50,6 +51,13 @@ function validHttpsUrl(value) {
   }
 }
 
+function canonicalJson(value) {
+  return JSON.stringify(value, (_key, nested) => {
+    if (!nested || typeof nested !== 'object' || Array.isArray(nested)) return nested;
+    return Object.fromEntries(Object.keys(nested).sort().map((key) => [key, nested[key]]));
+  });
+}
+
 export function validateCatalog(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || value.schemaVersion !== 1 ||
       !Array.isArray(value.activities) || value.activities.length > 2000) {
@@ -81,6 +89,10 @@ export function validateCatalog(value) {
     if (entry.minExtensionVersion !== undefined && !isSemanticVersion(entry.minExtensionVersion)) {
       throw new Error(`The catalog entry for ${entry.id} has an invalid minimum extension version.`);
     }
+    if (entry.apiVersion === 2) {
+      try { validateActivityV2PageAccess(entry.pageAccess); }
+      catch { throw new Error(`The catalog entry for ${entry.id} has invalid page access declarations.`); }
+    }
     if (entry.network !== undefined &&
         (!Array.isArray(entry.network) || entry.network.length > 32 ||
          new Set(entry.network).size !== entry.network.length ||
@@ -95,6 +107,18 @@ export function validateCatalog(value) {
     if (entry.defaultMediaKind !== undefined &&
         !DEFAULT_MEDIA_KINDS.has(entry.defaultMediaKind)) {
       throw new Error(`The catalog entry for ${entry.id} has an invalid default media kind.`);
+    }
+    if (entry.settingsUi !== undefined) {
+      const ui = entry.settingsUi;
+      const labels = ui?.statusLabels;
+      if (!ui || typeof ui !== 'object' || Array.isArray(ui) ||
+          Object.keys(ui).some((key) => key !== 'statusLabels') ||
+          (labels !== undefined && (!labels || typeof labels !== 'object' || Array.isArray(labels) ||
+            Object.entries(labels).some(([key, value]) =>
+              !['app', 'artist', 'track'].includes(key) || typeof value !== 'string' ||
+              !value.trim() || value.length > 80)))) {
+        throw new Error(`The catalog entry for ${entry.id} has invalid settings UI labels.`);
+      }
     }
     if (entry.author !== undefined &&
         (!entry.author || typeof entry.author !== 'object' || Array.isArray(entry.author) ||
@@ -272,14 +296,18 @@ export async function downloadActivity(activityId, catalog) {
     throw new Error(`Activity metadata is invalid: ${error.message}`);
   }
   validateActivitySource(source);
+  const comparableFields = ['name', 'description', 'version', 'apiVersion', 'minExtensionVersion', 'matches',
+    'category', 'aliases', 'tags', 'excludeMatches', 'author', 'contributors',
+    'serviceUrl', 'homepage', 'repository', 'presence', 'defaultMediaKind',
+    'frames', 'network', 'settings', 'settingsUi', 'pageAccess'];
+  const mismatch = comparableFields.find((field) =>
+    canonicalJson(packageMetadata[field]) !== canonicalJson(entry[field]));
   if (!isSupportedActivityApiVersion(metadata.apiVersion) || metadata.id !== entry.id ||
-      ['name', 'description', 'version', 'apiVersion', 'minExtensionVersion', 'matches',
-        'category', 'aliases', 'tags', 'excludeMatches', 'author', 'contributors',
-        'serviceUrl', 'homepage', 'repository', 'presence', 'defaultMediaKind',
-        'frames', 'network', 'settings']
-        .some((field) => JSON.stringify(packageMetadata[field]) !== JSON.stringify(entry[field])) ||
-      Boolean(metadata.icon) !== Boolean(iconBytes)) {
-    throw new Error('Activity metadata does not match its catalog entry.');
+      mismatch || Boolean(metadata.icon) !== Boolean(iconBytes)) {
+    const field = metadata.id !== entry.id ? 'id' : mismatch || 'icon or API version';
+    const error = new Error(`Activity metadata does not match its catalog entry (${field}). Refresh the catalog and try again.`);
+    error.code = 'catalog_metadata_mismatch';
+    throw error;
   }
   const icon = iconBytes ? `data:image/png;base64,${bytesToBase64(iconBytes)}` : undefined;
   return {
@@ -324,7 +352,8 @@ export function compareActivityVersions(left, right) {
     const bNumeric = /^\d+$/.test(b.prerelease[index]);
     if (aNumeric && bNumeric) return BigInt(a.prerelease[index]) < BigInt(b.prerelease[index]) ? -1 : 1;
     if (aNumeric !== bNumeric) return aNumeric ? -1 : 1;
-    return a.prerelease[index].localeCompare(b.prerelease[index]);
+    // SemVer uses ASCII ordering, independent of the browser's locale.
+    return a.prerelease[index] < b.prerelease[index] ? -1 : 1;
   }
   return 0;
 }

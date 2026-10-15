@@ -3,10 +3,6 @@ import { EXTENSION_NAME } from './branding.js';
 const MAX_TEXT_LENGTH = 128;
 
 const LEGACY_SOURCE_LAYOUTS = Object.freeze({
-  youtube: {
-    name: 'YouTube',
-    statusFields: { app: 'name', creator: 'state', video: 'details' },
-  },
   youtubeMusic: {
     name: 'YouTube Music',
     statusFields: { app: 'name', artist: 'state', track: 'details' },
@@ -18,14 +14,6 @@ const LEGACY_SOURCE_LAYOUTS = Object.freeze({
   movies67: {
     name: '67Movies',
     statusFields: { app: 'name', series: 'details', episode: 'state' },
-  },
-  twitch: {
-    name: 'Twitch',
-    statusFields: { app: 'name', streamer: 'state', stream: 'details' },
-  },
-  kick: {
-    name: 'Kick',
-    statusFields: { app: 'name', streamer: 'state', stream: 'details' },
   },
 });
 
@@ -49,6 +37,21 @@ function isNormalizedActivityReport(track) {
   return Boolean(track?.media && track?.playback && track?.display && track?.artwork);
 }
 
+function legacyButtons(track) {
+  if (Array.isArray(track.buttons)) return track.buttons;
+  const url = safeUrl(track.url);
+  if (!url) return [];
+
+  if (track.source === 'movies67') {
+    return [
+      { label: track.kind === 'movie' ? 'Watch movie' : 'Watch on 67Movies', url },
+      { label: 'Open 67Movies', url: `${new URL(url).origin}/` },
+    ];
+  }
+
+  return [{ label: 'Open', url }];
+}
+
 function reportForTrack(track) {
   if (isNormalizedActivityReport(track)) return track;
   const kind = track.kind === 'short' ? 'video' : track.kind === 'live' ? 'stream' : track.kind || 'generic';
@@ -65,7 +68,6 @@ function reportForTrack(track) {
     category: track.category,
   };
   const displayDefaults = (() => {
-    if (track.source === 'youtube') return { details: media.title, state: media.artist || media.channel || '' };
     if (track.source === 'youtubeMusic') return { details: media.title, state: media.artist || '' };
     if (track.source === 'crunchyroll' || track.source === 'movies67') {
       const movie = track.kind === 'movie';
@@ -73,9 +75,6 @@ function reportForTrack(track) {
         details: movie ? media.title : media.series || media.artist || media.title,
         state: movie ? legacyLayout.name : media.album || media.title,
       };
-    }
-    if (track.source === 'twitch' || track.source === 'kick') {
-      return { details: media.title, state: media.artist || media.creator || '' };
     }
     if (kind === 'song') return { details: media.title, state: media.artist || '' };
     if (kind === 'episode') return { details: media.series || media.title, state: media.title };
@@ -105,9 +104,7 @@ function reportForTrack(track) {
     },
     ...(!track.activityName && legacyLayout ? { activityName: legacyLayout.name } : {}),
     artwork: legacyArtwork,
-    buttons: Array.isArray(track.buttons)
-      ? track.buttons
-      : track.url ? [{ label: 'Open', url: track.url }] : [],
+    buttons: legacyButtons(track),
     visibility: track.ad ? 'ad' : track.idle ? 'idle' : 'normal',
   };
 }
@@ -128,7 +125,7 @@ function activityType(report) {
           : report.kind === 'song'
             ? 'listening'
             : report.kind === 'stream'
-              ? 'streaming'
+              ? 'watching'
               : report.kind === 'game' || report.kind === 'generic'
                 ? 'playing'
                 : 'watching';
@@ -141,13 +138,14 @@ function timestamps(playback, nowMs) {
   if (playback.state !== 'playing') return null;
   const position = Math.max(0, Number(playback.position) || 0);
   const now = Math.floor(nowMs / 1000);
-  if (playback.live) return { start: now - Math.floor(position) };
+  if (playback.live || playback.elapsed) return { start: now - Math.floor(position) };
   const duration = Math.max(0, Number(playback.duration) || 0);
   if (!duration || position >= duration) return null;
   return { start: now - Math.floor(position), end: now + Math.ceil(duration - position) };
 }
 
 function statusDisplayType(report, settings) {
+  if (report.display.statusDisplayOverride) return report.display.statusDisplayOverride;
   const selected = report.display.statusFields?.[settings.statusDisplay];
   if (selected) return selected;
   if (settings.statusDisplay === 'app') return 'name';
@@ -162,17 +160,23 @@ export function createPresenceIntent(track, nowMs = Date.now(), settings = {}) {
   const report = reportForTrack(track);
   if (report.visibility !== 'normal' || !report.media?.title) return null;
 
-  const name = cleanText(report.activityName || EXTENSION_NAME, 128);
+  const name = cleanText(report.display.name || report.activityName || EXTENSION_NAME, 128);
   const details = cleanText(report.display.details || report.media.title);
   if (!details) return null;
   const paused = report.playback.state === 'paused';
   const markers = [report.playback.live && 'Live', paused && 'Paused'].filter(Boolean);
-  const state = cleanText(report.display.state || report.media.artist || report.media.creator || name);
+  const state = cleanText(report.playback.elapsed
+    ? report.display.state ?? ''
+    : report.display.state || report.media.artist || report.media.creator || name);
   const type = activityType(report);
   const streamUrl = safeUrl(report.url) || safeUrl(report.buttons?.[0]?.url);
   const art = settings.showArtwork === false ? null : report.artwork;
   const largeImage = safeUrl(art?.large);
+  const largeUrl = safeUrl(art?.largeUrl);
   const smallImage = safeUrl(art?.small);
+  const detailsUrl = safeUrl(report.display.detailsUrl);
+  const stateUrl = safeUrl(report.display.stateUrl);
+  const hideState = report.display.hideState === true;
   const buttons = settings.showButtons === false
     ? []
     : (report.buttons || []).map((button) => {
@@ -186,12 +190,15 @@ export function createPresenceIntent(track, nowMs = Date.now(), settings = {}) {
     type,
     ...(type === 'streaming' && streamUrl ? { streamUrl } : {}),
     details,
-    state: markers.length ? `${cleanText(state, MAX_TEXT_LENGTH - markers.join(' • ').length - 3)} • ${markers.join(' • ')}` : state,
+    ...(detailsUrl ? { detailsUrl } : {}),
+    state: hideState ? '' : markers.length ? `${cleanText(state, MAX_TEXT_LENGTH - markers.join(' • ').length - 3)} • ${markers.join(' • ')}` : state,
+    ...(!hideState && stateUrl ? { stateUrl } : {}),
     statusDisplayType: statusDisplayType(report, settings),
     timestamps: settings.showTimestamps === false ? null : timestamps(report.playback, nowMs),
     assets: largeImage ? {
       largeImage,
-      largeText: cleanText(art.largeText || report.media.album || report.media.title),
+      largeText: cleanText(art.largeText ?? (report.media.album || report.media.title)),
+      ...(largeUrl ? { largeUrl } : {}),
       ...(smallImage ? { smallImage, smallText: cleanText(art.smallText || name) } : {}),
     } : null,
     buttons,

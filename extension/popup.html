@@ -41,7 +41,10 @@
             <div class="art-fallback" id="art-fallback" aria-hidden="true">
               <svg viewBox="0 0 32 32"><rect x="4" y="7" width="24" height="18" rx="5"/><path d="m13 12 7 4-7 4z"/></svg>
             </div>
-            <span class="service-mark"><img id="active-service-icon" src="icons/icon32.png" alt="" /></span>
+            <span class="pause-mark" id="pause-mark" role="img" aria-label="Paused" hidden>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6.2" y="5" width="3.6" height="14" rx="1.5"/><rect x="14.2" y="5" width="3.6" height="14" rx="1.5"/></svg>
+            </span>
+            <span class="service-mark" id="service-mark"><img id="active-service-icon" src="icons/icon32.png" alt="" /></span>
           </div>
           <div class="presence-copy">
             <span class="kicker" id="kicker">Nothing playing</span>
@@ -58,15 +61,10 @@
 
       <section class="services-section" aria-labelledby="services-title">
         <div class="section-heading">
-          <div><span class="eyebrow">Sources</span><h2 id="services-title">Built-in services</h2></div>
+          <div><span class="eyebrow">Sources</span><h2 id="services-title">Services</h2></div>
           <button class="text-button" id="manage-services" type="button">Manage</button>
         </div>
-        <div class="service-grid">
-          <article class="service-tile" data-service="youtube"><img src="assets/services/youtube.svg" alt="" /><span><strong>YouTube</strong><small>Videos &amp; live</small></span><i></i></article>
-          <article class="service-tile" data-service="movies67"><img src="assets/services/movies67.svg" alt="" /><span><strong>67Movies</strong><small>Movies &amp; TV</small></span><i></i></article>
-          <article class="service-tile" data-service="twitch"><img src="assets/services/twitch.svg" alt="" /><span><strong>Twitch</strong><small>Streams &amp; VODs</small></span><i></i></article>
-          <article class="service-tile" data-service="kick"><img src="assets/services/kick.svg" alt="" /><span><strong>Kick</strong><small>Streams &amp; VODs</small></span><i></i></article>
-        </div>
+        <div class="service-grid"></div>
       </section>
 
       <section class="discord-card">
@@ -85,13 +83,15 @@
             <div><dt>Last report</dt><dd id="local-last-report">None</dd></div>
             <div><dt>Last clear</dt><dd id="local-last-clear">None</dd></div>
             <div><dt>Local presence intent</dt><dd id="local-presence-intent">Nothing selected</dd></div>
+            <div><dt>Browser-close backup</dt><dd id="discord-cleanup-backup">Not armed</dd></div>
+            <div><dt>Last Discord clear</dt><dd id="discord-cleanup-last">None</dd></div>
           </dl>
         </details>
       </section>
 
       <button class="settings-cta" id="open-settings" type="button">
         <span class="cta-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.86 2.86-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21H9.55v-.1A1.7 1.7 0 0 0 8.5 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.86-2.86.06-.06A1.7 1.7 0 0 0 4.1 15a1.7 1.7 0 0 0-1.1-1 1.7 1.7 0 0 0-1.1-.4H2V9.55h.1A1.7 1.7 0 0 0 4.1 8.5a1.7 1.7 0 0 0-.34-1.88l-.06-.06L6.56 3.7l.06.06A1.7 1.7 0 0 0 8.5 4.1a1.7 1.7 0 0 0 1-1.1 1.7 1.7 0 0 0 .4-1.1V2h4.05v.1A1.7 1.7 0 0 0 15 4.1a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.86 2.86-.06.06A1.7 1.7 0 0 0 19.4 8.5a1.7 1.7 0 0 0 1.1 1 1.7 1.7 0 0 0 1.1.4h.1v4.05h-.1a1.7 1.7 0 0 0-2.2 1.05Z"/></svg></span>
-        <span><strong>Personalize your presence</strong><small>Per-service artwork, timers, buttons, and more</small></span>
+        <span><strong>Personalize your presence</strong><small>Activity artwork, timers, buttons, and more</small></span>
         <svg class="chevron" viewBox="0 0 20 20" aria-hidden="true"><path d="m7 4 6 6-6 6"/></svg>
       </button>
     </main>
@@ -116,8 +116,10 @@
           </div>
         </section>
 
-        <div class="settings-label"><span>Services</span><small>Tap a service for details</small></div>
-        <div id="service-settings"></div>
+        <section id="activity-settings-section" aria-labelledby="activity-settings-title" hidden>
+          <div class="settings-label"><span id="activity-settings-title">Installed Activities</span><small>Presence preferences</small></div>
+          <div id="activity-settings"></div>
+        </section>
 
         <section class="privacy-note">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22s8-3.7 8-10V5l-8-3-8 3v7c0 6.3 8 10 8 10Z"/><path d="m8.5 12 2.2 2.2 4.8-5"/></svg>

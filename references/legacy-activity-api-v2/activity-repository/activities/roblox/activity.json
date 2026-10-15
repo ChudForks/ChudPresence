@@ -1,0 +1,166 @@
+{
+  "schemaVersion": 1,
+  "kind": "generic",
+  "scope": ".container-main",
+  "fields": {
+    "title": {
+      "source": "dom.text",
+      "selectors": ["h1.game-name"]
+    }
+  },
+  "page": {
+    "routes": [
+      {
+        "id": "landing",
+        "name": "Roblox",
+        "paths": ["/"],
+        "query": {},
+        "requiredQuery": [],
+        "scope": "#react-landing-container",
+        "title": "Home",
+        "details": "Browsing home"
+      },
+      {
+        "id": "home",
+        "name": "Roblox",
+        "paths": ["/home", "/home/"],
+        "query": {},
+        "requiredQuery": [],
+        "title": "Home",
+        "details": "Browsing home"
+      },
+      {
+        "id": "charts",
+        "name": "Roblox",
+        "paths": ["/discover", "/discover/", "/charts", "/charts/", "/charts/{segment}", "/charts/{segment}/", "/games", "/games/"],
+        "query": {},
+        "requiredQuery": [],
+        "scope": "#game-carousel-web-app",
+        "title": "Charts",
+        "details": "Browsing charts"
+      },
+      {
+        "id": "experience",
+        "name": "Roblox",
+        "paths": ["/games/{number}", "/games/{number}/", "/games/{number}/{segment}", "/games/{number}/{segment}/"],
+        "query": {},
+        "requiredQuery": [],
+        "scope": "#game-detail-page",
+        "details": "Viewing: {title}"
+      },
+      {
+        "id": "marketplace",
+        "name": "Roblox",
+        "paths": ["/catalog", "/catalog/", "/catalog/{number}", "/catalog/{number}/", "/catalog/{number}/{segment}", "/catalog/{number}/{segment}/"],
+        "query": {},
+        "requiredQuery": [],
+        "title": "Marketplace",
+        "details": "Browsing marketplace"
+      },
+      {
+        "id": "robux",
+        "name": "Roblox",
+        "paths": ["/upgrades/robux", "/upgrades/robux/"],
+        "query": {},
+        "requiredQuery": [],
+        "title": "Robux",
+        "details": "Browsing Robux"
+      },
+      {
+        "id": "plus",
+        "name": "Roblox",
+        "paths": ["/plus", "/plus/"],
+        "query": {},
+        "requiredQuery": [],
+        "title": "Roblox Plus",
+        "details": "Browsing Roblox Plus"
+      },
+      {
+        "id": "profile",
+        "name": "Roblox",
+        "paths": ["/users/profile", "/users/profile/", "/users/{number}/profile", "/users/{number}/profile/"],
+        "query": {},
+        "requiredQuery": [],
+        "title": "Profiles",
+        "details": "Browsing profiles"
+      },
+      {
+        "id": "friends",
+        "name": "Roblox",
+        "paths": ["/users/friends", "/users/friends/", "/users/{number}/friends", "/users/{number}/friends/"],
+        "query": {},
+        "requiredQuery": [],
+        "title": "Friends",
+        "details": "Browsing friends"
+      },
+      {
+        "id": "avatar",
+        "name": "Roblox",
+        "paths": ["/my/avatar", "/my/avatar/"],
+        "query": {},
+        "requiredQuery": [],
+        "title": "Avatar",
+        "details": "Browsing avatar"
+      },
+      {
+        "id": "inventory",
+        "name": "Roblox",
+        "paths": ["/users/inventory", "/users/inventory/", "/users/{number}/inventory", "/users/{number}/inventory/"],
+        "query": {},
+        "requiredQuery": [],
+        "title": "Inventory",
+        "details": "Browsing inventory"
+      },
+      {
+        "id": "trades",
+        "name": "Roblox",
+        "paths": ["/trades", "/trades/"],
+        "query": {},
+        "requiredQuery": [],
+        "title": "Trades",
+        "details": "Browsing trades"
+      },
+      {
+        "id": "communities",
+        "name": "Roblox",
+        "paths": ["/communities", "/communities/", "/communities/{number}", "/communities/{number}/", "/communities/{number}/{segment}", "/communities/{number}/{segment}/"],
+        "query": {},
+        "requiredQuery": [],
+        "title": "Communities",
+        "details": "Browsing communities"
+      },
+      {
+        "id": "messages",
+        "name": "Roblox",
+        "paths": ["/my/messages", "/my/messages/"],
+        "query": {},
+        "requiredQuery": [],
+        "title": "Messages",
+        "details": "Browsing messages"
+      },
+      {
+        "id": "settings",
+        "name": "Roblox",
+        "paths": ["/my/account", "/my/account/"],
+        "query": {},
+        "requiredQuery": [],
+        "title": "Settings",
+        "details": "Browsing settings"
+      },
+      {
+        "id": "giftcards",
+        "name": "Roblox",
+        "paths": ["/giftcards-us", "/giftcards-us/", "/giftcards", "/giftcards/"],
+        "query": {},
+        "requiredQuery": [],
+        "title": "Gift cards",
+        "details": "Browsing gift cards"
+      }
+    ],
+    "elapsed": true,
+    "artwork": {
+      "large": "https://images.rbxcdn.com/905bd722ee0a6ceda3caacde54c0b081.png",
+      "largeText": "Roblox"
+    }
+  }
+}

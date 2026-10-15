@@ -18,13 +18,17 @@ import {
   normalizeActivityPreferences,
 } from './activity-settings.js';
 import { compareActivityVersions } from './activity-repository.js';
+import { activityV2ScriptDefinition } from './activity-v2-runtime.js';
+import { ActivityV2HostClient } from './activity-v2-host-client.js';
 
 const STORAGE_KEY = 'installedActivities';
 const SCRIPT_ID_PREFIX = 'chudpresence-activity-';
 const WORLD_ID_PREFIX = 'chudpresence.activity.';
 const MAX_REPORTS_PER_WINDOW = 30;
 const REPORT_WINDOW_MS = 10_000;
-const STATUS_TTL_MS = 30_000;
+// Background tabs can have script timers batched to roughly once a minute.
+// Leave room for that cadence before treating an otherwise live report as stale.
+const STATUS_TTL_MS = 90_000;
 const MAX_PAGE_EXECUTE_SOURCE_LENGTH = 16_384;
 const MAX_PAGE_EXECUTE_ARGUMENTS_LENGTH = 16_384;
 const MAX_PAGE_EXECUTE_RESULT_LENGTH = 65_536;
@@ -50,12 +54,29 @@ function extensionApi() {
   return globalThis.browser || globalThis.chrome;
 }
 
+function invokeActivityFetch(fetchImpl, url, init) {
+  // Chrome service workers reject a stored WorkerGlobalScope.fetch when it is
+  // called as a method: `this` becomes the caller and the binding throws
+  // "Failed to execute 'fetch' on 'WorkerGlobalScope': Illegal invocation".
+  // The native function has to be invoked as a property of the worker global.
+  // Injected implementations still receive that global as their receiver.
+  if (fetchImpl === globalThis.fetch) return globalThis.fetch(url, init);
+  return Reflect.apply(fetchImpl, globalThis, [url, init]);
+}
+
 function activityScriptId(id) {
   return `${SCRIPT_ID_PREFIX}${id}`;
 }
 
-function activityWorldId(id) {
-  return `${WORLD_ID_PREFIX}${id}`;
+function activityWorldId(id, apiVersion = 1) {
+  return `${WORLD_ID_PREFIX}${apiVersion === 2 ? 'v2.' : ''}${id}`;
+}
+
+function activityWorldConfiguration(definition, apiVersion) {
+  return {
+    worldId: definition.worldId, messaging: true,
+    ...(apiVersion === 2 ? { csp: "script-src 'self'; object-src 'none'; connect-src 'none'" } : {}),
+  };
 }
 
 function createActivityCapability() {
@@ -192,10 +213,17 @@ function pageExecutionCode(source, argsJson) {
 }
 
 function scriptDefinition(record, extensionVersion = '0.0.0') {
+  if (record.metadata.apiVersion === 2) return activityV2ScriptDefinition(record);
   const id = record.metadata.id;
   const code = [
-    '(() => {',
+    '(function __runActivityV1() {',
     "  'use strict';",
+    // Imperative execute() targets frames directly and does not apply the
+    // registered script's URL filters. Check them before starting any runtime.
+    `  const __matchesUrl = ${safeMatch.toString()};`,
+    `  if (!${JSON.stringify(record.metadata.matches)}.some((pattern) => __matchesUrl(pattern, location.href)) ||`,
+    `      ${JSON.stringify(record.metadata.excludeMatches || [])}.some((pattern) => __matchesUrl(pattern, location.href))) return;`,
+    ...(record.metadata.frames === 'all' ? [] : ['  if (window !== window.top) return;']),
     '  const __activityIdentity = Object.freeze(' + JSON.stringify({
     activityId: id,
     activityVersion: record.metadata.version,
@@ -203,9 +231,12 @@ function scriptDefinition(record, extensionVersion = '0.0.0') {
     extensionVersion,
     capability: record.capability,
   }) + ');',
+    '  if (globalThis.__chudpresenceActivityGeneration === __activityIdentity.capability) return;',
+    '  globalThis.__chudpresenceActivityGeneration = __activityIdentity.capability;',
     '  const __request = (operation, payload = {}) => chrome.runtime.sendMessage({',
     '    type: "CHUDPRESENCE_ACTIVITY_REQUEST",',
     '    activityId: __activityIdentity.activityId,',
+    '    activityVersion: __activityIdentity.activityVersion,',
     '    capability: __activityIdentity.capability,',
     '    apiVersion: __activityIdentity.apiVersion,',
     '    requestId: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,',
@@ -219,6 +250,24 @@ function scriptDefinition(record, extensionVersion = '0.0.0') {
     '  const __lifecycleTimers = new Map();',
     '  const __lifecycleCleanups = new Set();',
     '  let __lifecycleEnded = false;',
+    `  const __navigationGraceMs = ${record.metadata.presence?.navigationGraceMs || 0};`,
+    '  let __documentNavigation = null;',
+    '  const __hasDocumentNavigation = () => Boolean(__documentNavigation && !__documentNavigation.signal?.aborted);',
+    '  const __onDocumentNavigate = (event) => {',
+    '    const url = event.destination?.url;',
+    '    __documentNavigation = __navigationGraceMs > 0 && window === window.top && !event.defaultPrevented &&',
+    '      event.destination?.sameDocument === false && typeof url === "string" && url.length <= 8192 &&',
+    `      ${JSON.stringify(record.metadata.matches)}.some(pattern => __matchesUrl(pattern, url)) &&`,
+    `      !${JSON.stringify(record.metadata.excludeMatches || [])}.some(pattern => __matchesUrl(pattern, url))`,
+    '      ? { url, signal: event.signal } : null;',
+    '  };',
+    '  const __onDocumentNavigationError = () => { __documentNavigation = null; };',
+    '  const __onDocumentPageShow = (event) => {',
+    '    window.removeEventListener("pageshow", __onDocumentPageShow);',
+    '    if (!event.persisted || globalThis.__chudpresenceActivityGeneration !== __activityIdentity.capability) return;',
+    '    delete globalThis.__chudpresenceActivityGeneration;',
+    '    __runActivityV1();',
+    '  };',
     '  const __runCleanup = (callback) => { try { callback(); } catch {} };',
     '  const __endLifecycle = (reason = "activity-ended") => {',
     '    if (__lifecycleEnded) return false;',
@@ -232,14 +281,32 @@ function scriptDefinition(record, extensionVersion = '0.0.0') {
     '    __lifecycleCleanups.clear();',
     '    window.removeEventListener("pagehide", __onDocumentEnd);',
     '    window.removeEventListener("beforeunload", __onDocumentEnd);',
+    '    window.navigation?.removeEventListener?.("navigate", __onDocumentNavigate);',
+    '    window.navigation?.removeEventListener?.("navigateerror", __onDocumentNavigationError);',
     '    try { __runtimePort?.disconnect?.(); } catch {}',
+    // Keep the ended generation marked while a new document is pending so
+    // tabs.onUpdated cannot reinject into the outgoing document. A cached
+    // document restarts only when pageshow confirms that it was restored.
+    '    if (reason === "document-destroyed" && __navigationGraceMs > 0) {',
+    '      window.addEventListener("pageshow", __onDocumentPageShow, { once: true });',
+    '    } else { try { delete globalThis.__chudpresenceActivityGeneration; } catch {} }',
     '    return true;',
     '  };',
-    '  const __onDocumentEnd = () => __endLifecycle("document-destroyed");',
+    '  const __onDocumentEnd = () => {',
+    '    if (__lifecycleEnded) return;',
+    '    try { void __request("presence.clear", { closing: true,',
+    '      ...(__hasDocumentNavigation() ? { navigationUrl: __documentNavigation.url } : {}),',
+    '    }).catch(() => {}); } catch {}',
+    '    __endLifecycle("document-destroyed");',
+    '  };',
     '  const __matchesActivity = (message) => message?.type === "CHUDPRESENCE_ACTIVITY_ABORT" &&',
     '    message.activityId === __activityIdentity.activityId && message.activityVersion === __activityIdentity.activityVersion;',
     '  window.addEventListener("pagehide", __onDocumentEnd, { once: true });',
     '  window.addEventListener("beforeunload", __onDocumentEnd, { once: true });',
+    '  if (__navigationGraceMs > 0 && window === window.top) {',
+    '    window.navigation?.addEventListener?.("navigate", __onDocumentNavigate);',
+    '    window.navigation?.addEventListener?.("navigateerror", __onDocumentNavigationError);',
+    '  }',
     '  const __upgradeListeners = new Set();',
     '  const __lifecycle = Object.freeze({',
     '    signal: __lifecycleController.signal,',
@@ -583,7 +650,12 @@ function scriptDefinition(record, extensionVersion = '0.0.0') {
     '  const __emptyNamespace = Object.freeze({});',
     '  const ChudPresence = Object.freeze({',
     '    report(report) { __lastReport = report; return __request("presence.report", { report }); },',
-    '    clear() { __lastReport = null; return __request("presence.clear"); },',
+    '    clear() {',
+    // Focus/visibility changes during a known navigation can precede unload.
+    // Let the native closing clear perform the bounded handoff instead.
+    '      if (!__lifecycleEnded && __hasDocumentNavigation()) return Promise.resolve({ ok: true, data: { cleared: false, stale: false } });',
+    '      __lastReport = null; return __request("presence.clear");',
+    '    },',
     '    runtime: Object.freeze({',
     '      activityId: __activityIdentity.activityId,',
     '      activityVersion: __activityIdentity.activityVersion,',
@@ -657,8 +729,11 @@ function scriptDefinition(record, extensionVersion = '0.0.0') {
     worldId: activityWorldId(id),
     world: 'USER_SCRIPT',
     matches: [...record.metadata.matches],
+    ...(record.metadata.excludeMatches?.length ? { excludeMatches: [...record.metadata.excludeMatches] } : {}),
     allFrames: record.metadata.frames === 'all',
-    runAt: 'document_idle',
+    // document_idle waits until the page is idle, which a player iframe can
+    // delay for half a minute. document_end starts as soon as the DOM exists.
+    runAt: 'document_end',
     js: [{ code }],
   };
 }
@@ -698,7 +773,7 @@ function safeMatch(pattern, rawUrl) {
 }
 
 export class ActivityManager {
-  constructor({ api = extensionApi(), onReport = () => {}, onClear = () => {}, fetchImpl = globalThis.fetch } = {}) {
+  constructor({ api = extensionApi(), onReport = () => {}, onClear = () => {}, fetchImpl = globalThis.fetch, v2Host } = {}) {
     if (!api?.storage?.local) throw new Error('Extension storage API is required.');
     this.api = api;
     this.onReport = onReport;
@@ -706,6 +781,7 @@ export class ActivityManager {
     this.fetchImpl = fetchImpl;
     this.records = null;
     this.lastSeen = new Map();
+    this.removedTabs = new Set();
     this.reportRates = new Map();
     this.activeNetworkRequests = 0;
     this.activeNetworkByActivity = new Map();
@@ -716,6 +792,25 @@ export class ActivityManager {
     this.activityPorts = new Map();
     this.upgradeNotificationPorts = new WeakMap();
     this.operation = Promise.resolve();
+    this.v2Host = v2Host || new ActivityV2HostClient({ api,
+      onRequest: (session, operation, payload) => this.handleUserScriptMessage({
+        ...session.identity, requestId: `host-${Date.now()}`, operation, payload,
+      }, session.sender),
+      onFailure: async (session, message) => {
+        const record = (await this.load())[session.identity.activityId];
+        if (!record || record.capability !== session.identity.capability) return;
+        this.recordActivityError(session.identity.activityId, session.sender, 'sandbox_error', message);
+        this.executeActivityLog(session.identity.activityId, record, session.sender, {
+          level: 'error', args: ['V2 sandbox stopped', message],
+        });
+        for (const [port, context] of this.activityPorts.get(session.identity.activityId) || []) {
+          if (context.tabId !== session.sender.tab.id || context.documentId !== session.sender.documentId) continue;
+          try { port.postMessage({ type: 'CHUDPRESENCE_ACTIVITY_ABORT', activityId: session.identity.activityId,
+            activityVersion: session.identity.activityVersion, reason: 'sandbox-error' }); } catch {}
+        }
+        await this.handleUserScriptMessage({ ...session.identity, requestId: 'host-clear', operation: 'presence.clear', payload: { closing: true } }, session.sender);
+      },
+    });
   }
 
   serialize(operation) {
@@ -767,7 +862,9 @@ export class ActivityManager {
         compatibilityStatus,
         matches: Array.isArray(record.metadata.matches) ? [...record.metadata.matches] : [],
         network: Array.isArray(record.metadata.network) ? [...record.metadata.network] : [],
+        ...(record.metadata.apiVersion === 2 ? { pageAccess: structuredClone(record.metadata.pageAccess || {}) } : {}),
         settings: Array.isArray(record.metadata.settings) ? structuredClone(record.metadata.settings) : [],
+        ...(record.metadata.settingsUi ? { settingsUi: structuredClone(record.metadata.settingsUi) } : {}),
         settingValues: normalizeActivitySettings(record.metadata.settings || [], record.settingValues),
         rawReport: diagnostics.rawReport || null,
         normalizedReport: diagnostics.normalizedReport || null,
@@ -812,7 +909,7 @@ export class ActivityManager {
         frameContexts: frameContexts.map((context) => ({
           frameId: context.frameId,
           parentFrameId: context.parentFrameId,
-          state: context.active === false ? 'retired' : 'active',
+          state: context.active === false ? (context.documentId ? 'loading' : 'retired') : 'active',
           documentId: context.documentId || context.lastDocumentId || null,
           senderUrl: context.senderUrl,
           retiredDocumentIds: [...(context.retiredDocumentIds || [])],
@@ -917,6 +1014,36 @@ export class ActivityManager {
     this.activityDiagnostics.set(id, previous);
   }
 
+  async clearDiagnostics(id = null) {
+    if (id !== null) {
+      if (!isActivityId(id)) throw new TypeError('A valid Activity ID is required to clear its diagnostics.');
+      const record = (await this.load())[id];
+      if (!record || record.metadata?.id !== id) throw new Error(`Activity ${id} is not installed.`);
+    }
+    const inScope = (activityId) => id === null || activityId === id;
+    const activityLogsBefore = this.activityLogs.length;
+    this.activityLogs = this.activityLogs.filter((entry) => !inScope(entry.activityId));
+    const networkRequestsBefore = this.networkDiagnostics.length;
+    // Running requests hold these diagnostic objects until they finish. Keep
+    // them visible and leave their cancellation/concurrency state untouched.
+    this.networkDiagnostics = this.networkDiagnostics.filter((entry) =>
+      !inScope(entry.activityId) || entry.state === 'pending');
+    let diagnosticsCleared = 0;
+    for (const activityId of this.activityDiagnostics.keys()) {
+      if (!inScope(activityId)) continue;
+      this.activityDiagnostics.delete(activityId);
+      diagnosticsCleared += 1;
+    }
+    return {
+      id,
+      activityLogsCleared: activityLogsBefore - this.activityLogs.length,
+      networkRequestsCleared: networkRequestsBefore - this.networkDiagnostics.length,
+      diagnosticsCleared,
+      pendingNetworkRequests: this.networkDiagnostics.filter((entry) =>
+        inScope(entry.activityId) && entry.state === 'pending').length,
+    };
+  }
+
   setActivitySetting(id, settingId, value) {
     return this.serialize(() => this.setActivitySettingInternal(id, settingId, value));
   }
@@ -966,18 +1093,14 @@ export class ActivityManager {
   async handleUserScriptConnect(port) {
     const sender = port?.sender;
     const worldId = sender?.userScriptWorldId;
-    const portMatch = /^chudpresence-activity-v1:([a-z0-9][a-z0-9-]{1,63}):([^:]+):([a-f0-9]{64})$/.exec(port?.name || '');
+    const portMatch = /^chudpresence-activity-v([12]):([a-z0-9][a-z0-9-]{1,63}):([^:]+):([a-f0-9]{64})$/.exec(port?.name || '');
     if (!portMatch) return false;
-    const [, portActivityId, activityVersion, capability] = portMatch;
+    const [, apiVersion, portActivityId, activityVersion, capability] = portMatch;
     let id = portActivityId;
-    if (typeof worldId === 'string') {
-      if (!worldId.startsWith(WORLD_ID_PREFIX)) return false;
-      id = worldId.slice(WORLD_ID_PREFIX.length);
-      if (id !== portActivityId) return false;
-    }
     const record = (await this.load())[id];
     if (!record || record.metadata.id !== id || !record.enabled ||
-        activityVersion !== record.metadata.version || capability !== record.capability ||
+        (typeof worldId === 'string' && worldId !== activityWorldId(id, record.metadata.apiVersion)) ||
+        Number(apiVersion) !== record.metadata.apiVersion || activityVersion !== record.metadata.version || capability !== record.capability ||
         typeof sender?.tab?.id !== 'number' || !Number.isInteger(sender.frameId) ||
         typeof sender.documentId !== 'string' || !sender.documentId ||
         !record.metadata.matches.some((pattern) => safeMatch(pattern, sender.url || '')) ||
@@ -998,6 +1121,8 @@ export class ActivityManager {
 
   disconnectActivityPort(id, port) {
     const ports = this.activityPorts.get(id);
+    const context = ports?.get(port);
+    if (context) this.v2Host.stopContext(id, context.tabId, context.documentId);
     if (ports) {
       ports.delete(port);
       if (!ports.size) this.activityPorts.delete(id);
@@ -1034,10 +1159,7 @@ export class ActivityManager {
     }
 
     const definition = scriptDefinition(record, extensionVersion(this.api));
-    await this.api.userScripts.configureWorld({
-      worldId: definition.worldId,
-      messaging: true,
-    });
+    await this.api.userScripts.configureWorld(activityWorldConfiguration(definition, record.metadata.apiVersion));
     const registered = await this.installedScripts();
     if (registered.some((script) => script.id === definition.id)) {
       await this.api.userScripts.update([definition]);
@@ -1058,8 +1180,9 @@ export class ActivityManager {
     if (Boolean(metadata.icon) !== Boolean(icon)) {
       throw new Error('Activity icon metadata and package icon must be supplied together.');
     }
-    const sourceType = activityPackage?.sourceType === 'repository' ? 'repository' : 'local';
-    let source = { type: 'local' };
+    const sourceType = activityPackage?.sourceType === 'repository' ? 'repository'
+      : activityPackage?.sourceType === 'bundled' ? 'bundled' : 'local';
+    let source = { type: sourceType };
     if (sourceType === 'repository') {
       const provenance = activityPackage?.provenance;
       if (!provenance || provenance.repository !== 'ChudForks/ChudPresence-Activities' ||
@@ -1154,6 +1277,8 @@ export class ActivityManager {
         ...(Array.isArray(previous.metadata?.matches) ? previous.metadata.matches : []),
         ...(Array.isArray(previous.metadata?.network) ? previous.metadata.network : []),
       ], records);
+    } else {
+      await this.injectMatchingTabs(record);
     }
     return { id: metadata.id, name: metadata.name, version: metadata.version };
   }
@@ -1168,6 +1293,69 @@ export class ActivityManager {
 
   remove(id) {
     return this.serialize(() => this.removeInternal(id));
+  }
+
+  async matchingOpenTabs(record) {
+    if (typeof this.api.tabs?.query !== 'function') return [];
+    const patterns = Array.isArray(record?.metadata?.matches) ? record.metadata.matches : [];
+    if (!patterns.length) return [];
+    try {
+      const tabs = await this.api.tabs.query({ url: patterns });
+      return (Array.isArray(tabs) ? tabs : []).filter((tab) =>
+        Number.isInteger(tab?.id) && tab.discarded !== true &&
+        patterns.some((pattern) => safeMatch(pattern, tab.url || '')) &&
+        !(record.metadata.excludeMatches || []).some((pattern) => safeMatch(pattern, tab.url || '')),
+      );
+    } catch {
+      return [];
+    }
+  }
+
+  async injectMatchingTabs(record) {
+    if (!record?.enabled && record?.enabled !== undefined) return 0;
+    if (typeof this.api.userScripts?.execute !== 'function') return 0;
+    const tabs = await this.matchingOpenTabs(record);
+    let injected = 0;
+    for (const tab of tabs) {
+      if (await this.injectActivityTab(record, tab)) injected += 1;
+    }
+    return injected;
+  }
+
+  async injectActivityTab(record, tab) {
+    if (!record?.enabled && record?.enabled !== undefined) return false;
+    if (!Number.isInteger(tab?.id) || typeof this.api.userScripts?.execute !== 'function') return false;
+    try {
+      const results = await this.api.userScripts.execute({
+        js: scriptDefinition(record, extensionVersion(this.api)).js,
+        target: {
+          tabId: tab.id,
+          ...(record.metadata.frames === 'all' ? { allFrames: true } : {}),
+        },
+        world: 'USER_SCRIPT',
+        worldId: activityWorldId(record.metadata.id, record.metadata.apiVersion),
+        injectImmediately: true,
+      });
+      const result = Array.isArray(results) ? results[0] : null;
+      return !result?.error;
+    } catch {
+      // A closing or navigating tab should not fail installation or restore.
+      return false;
+    }
+  }
+
+  async injectMatchingTab(tabId, rawUrl) {
+    if (!Number.isInteger(tabId) || typeof rawUrl !== 'string' ||
+        typeof this.api.userScripts?.execute !== 'function') return 0;
+    const records = await this.load();
+    let injected = 0;
+    for (const record of Object.values(records)) {
+      const patterns = Array.isArray(record?.metadata?.matches) ? record.metadata.matches : [];
+      if (!record?.enabled || !patterns.some((pattern) => safeMatch(pattern, rawUrl))) continue;
+      if ((record.metadata.excludeMatches || []).some((pattern) => safeMatch(pattern, rawUrl))) continue;
+      if (await this.injectActivityTab(record, { id: tabId })) injected += 1;
+    }
+    return injected;
   }
 
   reload(id) {
@@ -1191,11 +1379,18 @@ export class ActivityManager {
     await this.register(record);
     let reloadedFrames = 0;
     for (const context of currentContexts) {
+      await this.api.userScripts.execute({
+        js: [{ code: 'try { delete globalThis.__chudpresenceActivityGeneration; } catch {}' }],
+        target: { tabId: context.tabId, documentIds: [context.documentId] },
+        world: 'USER_SCRIPT',
+        worldId: activityWorldId(id, record.metadata.apiVersion),
+        injectImmediately: true,
+      }).catch(() => {});
       const results = await this.api.userScripts.execute({
         js: scriptDefinition(record, extensionVersion(this.api)).js,
         target: { tabId: context.tabId, documentIds: [context.documentId] },
         world: 'USER_SCRIPT',
-        worldId: activityWorldId(id),
+        worldId: activityWorldId(id, record.metadata.apiVersion),
         injectImmediately: true,
       });
       const result = Array.isArray(results) ? results[0] : null;
@@ -1208,6 +1403,7 @@ export class ActivityManager {
       }
       reloadedFrames += 1;
     }
+    await this.injectMatchingTabs(record);
     return { id, reloadedFrames };
   }
 
@@ -1224,7 +1420,9 @@ export class ActivityManager {
       await this.save();
     } catch (error) {
       records[id] = previous;
-      if (previous.enabled) await this.register(previous).catch(() => {});
+      if (previous.enabled) {
+        await this.register(previous).then(() => this.injectMatchingTabs(previous)).catch(() => {});
+      }
       throw error;
     }
     try {
@@ -1232,7 +1430,9 @@ export class ActivityManager {
     } catch (error) {
       records[id] = previous;
       await this.save().catch(() => {});
-      if (previous.enabled) await this.register(previous).catch(() => {});
+      if (previous.enabled) {
+        await this.register(previous).then(() => this.injectMatchingTabs(previous)).catch(() => {});
+      }
       throw error;
     }
     this.activityDiagnostics.delete(id);
@@ -1301,6 +1501,8 @@ export class ActivityManager {
     if (enabled) {
       await this.register(record);
       record.permissionMissing = false;
+      record.enabled = true;
+      await this.injectMatchingTabs(record);
     } else {
       await this.notifyActivityTeardown(id, 'disabled');
       await this.unregister(id);
@@ -1316,8 +1518,14 @@ export class ActivityManager {
       record.enabled = wasEnabled;
       if (wasPermissionMissing === undefined) delete record.permissionMissing;
       else record.permissionMissing = wasPermissionMissing;
-      if (enabled && !wasEnabled) await this.unregister(id).catch(() => {});
-      else if (!enabled && wasEnabled) await this.register(record).catch(() => {});
+      if (enabled && !wasEnabled) {
+        await this.notifyActivityTeardown(id, 'enable-failed').catch(() => {});
+        await this.unregister(id).catch(() => {});
+        this.lastSeen.delete(id);
+        await this.onClear(id);
+      } else if (!enabled && wasEnabled) {
+        await this.register(record).then(() => this.injectMatchingTabs(record)).catch(() => {});
+      }
       throw error;
     }
     return { id, enabled: record.enabled };
@@ -1407,11 +1615,12 @@ export class ActivityManager {
       try {
         const exists = registered.some((script) => script.id === activityScriptId(record.metadata.id));
         const definition = scriptDefinition(record, extensionVersion(this.api));
-        await this.api.userScripts.configureWorld({ worldId: definition.worldId, messaging: true });
+        await this.api.userScripts.configureWorld(activityWorldConfiguration(definition, record.metadata.apiVersion));
         if (exists) await this.api.userScripts.update([definition]);
         else await this.api.userScripts.register([definition]);
         delete record.error;
         restored += 1;
+        await this.injectMatchingTabs(record);
       } catch (error) {
         record.permissionMissing = /permission|denied|not allowed/i.test(error.message || '');
         record.error = String(error.message || 'Activity restore failed').slice(0, 240);
@@ -1625,11 +1834,12 @@ export class ActivityManager {
         timeoutReject(error);
       }, timeoutMs);
       const requestPromise = (async () => {
-        const response = await this.fetchImpl(url.href, {
+        const response = await invokeActivityFetch(this.fetchImpl, url.href, {
           method: normalizedMethod,
           headers,
           ...(body === undefined ? {} : { body }),
           credentials: 'omit',
+          ...(record.metadata.apiVersion === 2 ? { cache: 'no-store' } : {}),
           redirect: 'error',
           referrerPolicy: 'no-referrer',
           signal: controller.signal,
@@ -1780,6 +1990,7 @@ export class ActivityManager {
   }
 
   async notifyActivityTeardown(id, reason) {
+    this.v2Host.stopActivity(id);
     const record = this.records?.[id];
     let notified = 0;
     for (const [port, context] of this.activityPorts.get(id) || []) {
@@ -1811,20 +2022,24 @@ export class ActivityManager {
     const records = await this.load();
     const worldId = sender?.userScriptWorldId;
     let id = message?.activityId;
-    if (typeof worldId === 'string') {
-      if (!worldId.startsWith(WORLD_ID_PREFIX)) return false;
-      const worldActivityId = worldId.slice(WORLD_ID_PREFIX.length);
-      if (worldActivityId !== id) return false;
-      id = worldActivityId;
-    }
     if (!isActivityId(id) || !ACTIVITY_CAPABILITY_PATTERN.test(message?.capability || '')) return false;
     const record = records[id];
     const tabId = sender?.tab?.id;
     if (!record || record.metadata.id !== id || !record.enabled ||
+        (typeof worldId === 'string' && worldId !== activityWorldId(id, record.metadata.apiVersion)) ||
         !ACTIVITY_CAPABILITY_PATTERN.test(record.capability || '') || message.capability !== record.capability ||
-        typeof tabId !== 'number') return false;
-    if (!record.metadata.matches.some((pattern) => safeMatch(pattern, sender.url || ''))) return false;
-    if ((record.metadata.excludeMatches || []).some((pattern) => safeMatch(pattern, sender.url || ''))) return false;
+        typeof tabId !== 'number' || this.removedTabs.has(tabId)) return false;
+    if (structured && message.activityVersion !== record.metadata.version) return false;
+    // V2 has no legacy request path or arbitrary main-world execution escape.
+    // Enforce this here even if a future guest bridge exposes more operations.
+    if (record.metadata.apiVersion === 2 && (!structured || message.operation === 'page.execute')) {
+      return { ok: false, requestId: message.requestId || '', error: {
+        code: 'unsupported_operation', message: 'V2 does not permit arbitrary page-context execution.',
+      } };
+    }
+    const scopedV2Clear = structured && record.metadata.apiVersion === 2 && message.operation === 'presence.clear';
+    if (!scopedV2Clear && !record.metadata.matches.some((pattern) => safeMatch(pattern, sender.url || ''))) return false;
+    if (!scopedV2Clear && (record.metadata.excludeMatches || []).some((pattern) => safeMatch(pattern, sender.url || ''))) return false;
 
     const requestId = structured ? message.requestId : '';
     const respond = (ok, data = null, code = '', description = '', name = '') => {
@@ -1852,7 +2067,9 @@ export class ActivityManager {
       if (message.apiVersion !== record.metadata.apiVersion) {
         return respond(false, null, 'unsupported_api_version', 'The Activity API version does not match its package metadata.');
       }
-      if (message.operation === 'presence.report') {
+      if (message.operation === 'sandbox.update' && record.metadata.apiVersion === 2) {
+        operation = 'sandbox.update';
+      } else if (message.operation === 'presence.report') {
         operation = 'report';
         reportValue = message.payload?.report;
       } else if (message.operation === 'presence.clear') {
@@ -1887,7 +2104,7 @@ export class ActivityManager {
       return false;
     }
 
-    if (!this.allowReport(id, tabId)) {
+    if (!(record.metadata.apiVersion === 2 && operation === 'clear') && !this.allowReport(id, tabId)) {
       return respond(false, null, 'rate_limited', 'The Activity has sent too many requests.');
     }
 
@@ -1960,6 +2177,20 @@ export class ActivityManager {
       return respond(false, null, 'unsupported_context', 'This browser did not provide a document-bound Activity context.');
     }
 
+    if (operation === 'sandbox.update') {
+      if (!Number.isInteger(sender.frameId)) return respond(false, null, 'unsupported_context', 'A document-bound frame is required.');
+      try {
+        const data = await this.v2Host.update({
+          identity: {
+            type: 'CHUDPRESENCE_ACTIVITY_REQUEST', activityId: id, activityVersion: record.metadata.version,
+            apiVersion: 2, capability: record.capability,
+          },
+          sender: { ...sender, tab: { id: tabId } }, source: record.code, snapshot: message.payload?.snapshot,
+        });
+        return respond(true, data);
+      } catch (error) { return respond(false, null, 'sandbox_error', String(error.message || 'Could not update Activity sandbox.').slice(0, 240)); }
+    }
+
     if (operation === 'lifecycle.upgradeComplete' || operation === 'lifecycle.upgradeError') {
       try {
         const result = await this.completeActivityUpgrade(id, record, sender, operation, lifecycleRequest);
@@ -2021,12 +2252,25 @@ export class ActivityManager {
         seen.retiredDocumentIds?.has(messageDocumentId) ||
         (seen.documentId && messageDocumentId && seen.documentId !== messageDocumentId) ||
         (!seen.documentId && !messageDocumentId && seen.senderUrl && sender.url && seen.senderUrl !== sender.url);
+      if (record.metadata.apiVersion === 2 && message.payload?.closing === true) this.v2Host.stopContext(id, tabId, messageDocumentId);
       if (isLateClear) return respond(true, { cleared: false, stale: true });
       this.recordActivityClear(id, sender);
       frames.delete(frameId);
       if (!frames.size) tabs.delete(tabId);
       if (!tabs.size) this.lastSeen.delete(id);
-      await this.onClear(id, tabId, messageDocumentId, frameId);
+      if (structured && message.payload?.closing === true) {
+        const navigationUrl = message.payload?.navigationUrl;
+        const navigationGraceMs = frameId === 0 &&
+          typeof navigationUrl === 'string' && navigationUrl.length <= 8192 &&
+          record.metadata.matches.some(pattern => safeMatch(pattern, navigationUrl)) &&
+          !(record.metadata.excludeMatches || []).some(pattern => safeMatch(pattern, navigationUrl))
+          ? record.metadata.presence?.navigationGraceMs || 0 : 0;
+        await this.onClear(id, tabId, messageDocumentId, frameId, {
+          closing: true, ...(navigationGraceMs > 0 ? { navigationGraceMs } : {}),
+        });
+      } else {
+        await this.onClear(id, tabId, messageDocumentId, frameId);
+      }
       return respond(true, { cleared: true, stale: false });
     }
 
@@ -2048,7 +2292,7 @@ export class ActivityManager {
     }
     const replacedTopDocument = frameId === 0 && prior?.documentId && prior.documentId !== sender.documentId;
     const staleChildren = replacedTopDocument
-      ? [...frames.entries()].filter(([childFrameId, context]) => childFrameId !== 0 && context.active !== false && context.documentId)
+      ? [...frames.entries()].filter(([childFrameId, context]) => childFrameId !== 0 && context.documentId)
       : [];
     for (const [childFrameId, childContext] of staleChildren) {
       const childRetiredDocumentIds = new Set(childContext.retiredDocumentIds || []);
@@ -2087,9 +2331,10 @@ export class ActivityManager {
       activityCategory: record.metadata.category || 'other',
       activityVersion: record.metadata.version,
     };
+    const presenceTrack = redactActivityCapability(track, record.capability);
     const diagnostics = this.activityDiagnostics.get(id) || {};
     diagnostics.rawReport = sanitizeDiagnosticValue(reportValue);
-    diagnostics.normalizedReport = sanitizeDiagnosticValue(track);
+    diagnostics.normalizedReport = sanitizeDiagnosticValue(presenceTrack);
     diagnostics.lastReport = {
       timestamp: new Date().toISOString(),
       tabId,
@@ -2106,7 +2351,7 @@ export class ActivityManager {
       senderUrl: sender.url || '',
       lastSeen: Date.now(),
       active: true,
-      track,
+      track: presenceTrack,
       retiredDocumentIds,
     });
     for (const [childFrameId, childContext] of staleChildren) {
@@ -2118,6 +2363,7 @@ export class ActivityManager {
         return respond(false, null, 'stale_document', 'This Activity document has already been replaced.');
       }
     }
+    if (this.removedTabs.has(tabId)) return respond(false, null, 'stale_document', 'The Activity tab has closed.');
     await this.onReport({
       activityId: id,
       documentId: sender.documentId || null,
@@ -2125,7 +2371,7 @@ export class ActivityManager {
       parentFrameId: Number.isInteger(sender.parentFrameId) ? sender.parentFrameId : null,
       senderUrl: sender.url || '',
       tabId,
-      track,
+      track: presenceTrack,
     });
     return respond(true, { accepted: true });
   }
@@ -2205,23 +2451,32 @@ export class ActivityManager {
     });
   }
 
-  async invalidateTab(tabId) {
+  async invalidateTab(tabId, { retireDocuments = true, removed = false } = {}) {
     if (!Number.isInteger(tabId)) return 0;
+    if (removed) {
+      // Messages queued before tabs.onRemoved can arrive after worker teardown.
+      // Retire the tab before any await so they cannot recreate its VM/presence.
+      this.removedTabs.add(tabId);
+      while (this.removedTabs.size > 1024) this.removedTabs.delete(this.removedTabs.values().next().value);
+    }
+    if (retireDocuments) this.v2Host.stopTab(tabId);
     const callbacks = [];
     let invalidated = 0;
     for (const [id, tabs] of this.lastSeen) {
       const frames = tabs.get(tabId);
       if (!frames) continue;
       for (const [frameId, context] of frames) {
-        if (context.active === false) continue;
+        if (context.active === false && (!retireDocuments || !context.documentId)) continue;
         const retiredDocumentIds = new Set(context.retiredDocumentIds || []);
-        if (context.documentId) retiredDocumentIds.add(context.documentId);
+        if (retireDocuments && context.documentId) retiredDocumentIds.add(context.documentId);
         while (retiredDocumentIds.size > MAX_RETIRED_DOCUMENTS_PER_FRAME) {
           retiredDocumentIds.delete(retiredDocumentIds.values().next().value);
         }
         frames.set(frameId, {
           ...context,
-          documentId: null,
+          // A loading update is not proof of replacement. Retain the ID so a
+          // same-document report resumes immediately and a new ID retires it.
+          documentId: retireDocuments ? null : context.documentId,
           lastDocumentId: context.documentId,
           active: false,
           lastSeen: Date.now(),

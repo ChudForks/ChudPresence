@@ -1,0 +1,29 @@
+{
+  "name": "@chudpresence/activity-sdk-v2",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Tooling and catalog for declarative ChudPresence Activity API V2 packages.",
+  "types": "./schemas/activity-api-v2.d.ts",
+  "exports": {
+    "./types": "./schemas/activity-api-v2.d.ts"
+  },
+  "bin": {
+    "chudpresence": "tools/chudpresence.mjs"
+  },
+  "scripts": {
+    "activity": "node tools/chudpresence.mjs activity",
+    "build:catalog": "node tools/build-catalog.mjs",
+    "check:contract": "node tools/generate-api-v2.mjs --check",
+    "check:catalog": "node tools/build-catalog.mjs --check",
+    "check:versions": "node tools/check-version-bumps.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

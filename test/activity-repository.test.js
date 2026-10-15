@@ -1,8 +1,19 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { downloadActivity, validateCatalog } from '../extension/core/activity-repository.js';
+import { compareActivityVersions, downloadActivity, validateCatalog } from '../extension/core/activity-repository.js';
 
 const originalFetch = globalThis.fetch;
+
+test('orders Activity updates by SemVer precedence rather than locale collation', () => {
+  const versions = ['1.0.0-1', '1.0.0-Z', '1.0.0-a-b', '1.0.0-alpha', '1.0.0-alpha.2',
+    '1.0.0-alpha.10', '1.0.0-beta', '1.0.0'];
+  for (let index = 1; index < versions.length; index += 1) {
+    assert.equal(compareActivityVersions(versions[index - 1], versions[index]), -1);
+    assert.equal(compareActivityVersions(versions[index], versions[index - 1]), 1);
+  }
+  assert.equal(compareActivityVersions('1.0.0+new-build', '1.0.0+old-build'), 0);
+  assert.equal(compareActivityVersions('1.0.0-alpha.9007199254740993', '1.0.0-alpha.9007199254740992'), 1);
+});
 
 async function sha256(value) {
   const bytes = typeof value === 'string' ? new TextEncoder().encode(value) : value;
@@ -34,7 +45,7 @@ function createFixture() {
 async function entryFor(fixture, overrides = {}) {
   const metadata = JSON.parse(fixture.metadata);
   const metadataFields = ['author', 'contributors', 'category', 'aliases', 'tags', 'matches', 'excludeMatches',
-    'serviceUrl', 'homepage', 'repository', 'presence', 'defaultMediaKind', 'frames', 'network', 'settings'];
+    'serviceUrl', 'homepage', 'repository', 'presence', 'defaultMediaKind', 'frames', 'network', 'settings', 'settingsUi'];
   return {
     id: metadata.id,
     name: metadata.name,
@@ -61,6 +72,7 @@ test('validates expanded catalog metadata and carries it into the verified packa
   metadata.excludeMatches = ['https://music.youtube.com/shorts/*'];
   metadata.contributors = [{ name: 'Sample Author', url: 'https://example.com/author' }];
   metadata.serviceUrl = 'https://music.youtube.com/';
+  metadata.settingsUi = { statusLabels: { app: 'YouTube Music', artist: 'Artist', track: 'Song title' } };
   fixture.metadata = JSON.stringify(metadata);
   fixture.files.set('metadata.json', fixture.metadata);
   stubRepositoryFetch(fixture);
@@ -73,6 +85,33 @@ test('validates expanded catalog metadata and carries it into the verified packa
     assert.deepEqual(activityPackage.metadata.excludeMatches, metadata.excludeMatches);
     assert.equal(activityPackage.metadata.defaultMediaKind, 'song');
     assert.equal(activityPackage.metadata.serviceUrl, metadata.serviceUrl);
+    assert.deepEqual(activityPackage.metadata.settingsUi, metadata.settingsUi);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('compares nested catalog metadata by value regardless of object key order', async () => {
+  const fixture = createFixture();
+  const metadata = JSON.parse(fixture.metadata);
+  metadata.settings = [{
+    id: 'displayMode', type: 'select', label: 'Display mode', default: 'artist',
+    options: [{ label: 'Artist', value: 'artist' }, { label: 'Album', value: 'album' }],
+  }];
+  fixture.metadata = JSON.stringify(metadata);
+  fixture.files.set('metadata.json', fixture.metadata);
+  stubRepositoryFetch(fixture);
+  try {
+    const entry = await entryFor(fixture, {
+      settings: [{
+        options: [{ value: 'artist', label: 'Artist' }, { value: 'album', label: 'Album' }],
+        default: 'artist', label: 'Display mode', type: 'select', id: 'displayMode',
+      }],
+    });
+    const activityPackage = await downloadActivity('youtube-music', {
+      revision: 'c'.repeat(40), activities: [entry],
+    });
+    assert.deepEqual(activityPackage.metadata.settings, metadata.settings);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -154,6 +193,18 @@ test('rejects unsafe catalog network permissions before an install prompt', asyn
   }
 });
 
+test('rejects invalid catalog status labels before downloading an Activity', async () => {
+  const base = await entryFor(createFixture());
+  for (const settingsUi of [
+    { statusLabels: { unknown: 'Unknown' } },
+    { statusLabels: { track: '   ' } },
+    { statusLabels: { track: 42 } },
+  ]) {
+    assert.throws(() => validateCatalog({ schemaVersion: 1, activities: [{ ...base, settingsUi }] }),
+      /invalid settings UI labels/);
+  }
+});
+
 test('rejects catalog display or permission fields that disagree with verified metadata', async () => {
   const fixture = createFixture();
   stubRepositoryFetch(fixture);
@@ -163,11 +214,13 @@ test('rejects catalog display or permission fields that disagree with verified m
       { name: 'Misleading Activity' },
       { network: ['https://api.example.com/*'] },
       { settings: [{ id: 'enabled', type: 'boolean', label: 'Enabled', default: true }] },
+      { settingsUi: { statusLabels: { track: 'Video title' } } },
     ]) {
       await assert.rejects(downloadActivity('youtube-music', {
         revision: 'a'.repeat(40),
         activities: [{ ...base, ...override }],
-      }), /Activity metadata does not match its catalog entry/);
+      }), (error) => error.code === 'catalog_metadata_mismatch' &&
+        /Activity metadata does not match its catalog entry/.test(error.message));
     }
   } finally {
     globalThis.fetch = originalFetch;
@@ -177,16 +230,24 @@ test('rejects catalog display or permission fields that disagree with verified m
 test('refuses to install a catalog package requiring an unsupported API version', async () => {
   const fixture = createFixture();
   const metadata = JSON.parse(fixture.metadata);
-  metadata.apiVersion = 2;
+  metadata.apiVersion = 999;
   fixture.metadata = JSON.stringify(metadata);
   fixture.files.set('metadata.json', fixture.metadata);
   stubRepositoryFetch(fixture);
   try {
     await assert.rejects(downloadActivity('youtube-music', {
       revision: 'a'.repeat(40),
-      activities: [await entryFor(fixture, { apiVersion: 2 })],
-    }), /Activity API version 2 is not supported/);
+      activities: [await entryFor(fixture, { apiVersion: 999 })],
+    }), /Activity API version 999 is not supported/);
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test('v2 catalog page declarations are checked before asking for website permissions', async () => {
+  const fixture = createFixture();
+  const entry = await entryFor(fixture, { apiVersion: 2, pageAccess: {
+    selectors: { secret: { selector: 'input[value^="x"]', read: 'text' } },
+  } });
+  assert.throws(() => validateCatalog({ schemaVersion: 1, activities: [entry] }), /invalid page access declarations/);
 });

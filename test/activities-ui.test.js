@@ -18,6 +18,8 @@ test('Activity Library explains Chromium user script availability and requests o
   assert.match(script, /chrome\.permissions\.request\(\{ origins \}\)/);
   assert.match(script, /api\.userScripts\?\.execute/);
   assert.doesNotMatch(script, /requestUserScriptsPermission|Firefox requires|Firefox permission/);
+  assert.match(script, /activities\/\$\{id\}\/icon\.png/);
+  assert.match(script, /ACTIVITY_REPOSITORY\.baseUrl/);
 });
 
 test('popup exposes visibility, playback, report, clear, and local intent diagnostics', async () => {

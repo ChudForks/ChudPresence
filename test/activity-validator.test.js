@@ -40,6 +40,16 @@ test('rejects unsupported metadata, broad hosts, and insecure website patterns',
   assert.throws(() => validateActivityMetadata(metadata({ network: ['https://discord.com/api/*'] })), /cannot declare Discord/);
 });
 
+test('rejects leading zeroes in every numeric prerelease version identifier', () => {
+  for (const version of ['1.2.3-01', '1.2.3-01.beta', '1.2.3-beta.01', '1.2.3-00+build']) {
+    assert.throws(() => validateActivityMetadata(metadata({ version })), /semantic version/);
+    assert.throws(() => validateActivityMetadata(metadata({ minExtensionVersion: version })), /semantic version/);
+  }
+  for (const version of ['1.2.3-0', '1.2.3-1.beta', '1.2.3-beta.0', '1.2.3-01beta', '1.2.3+01']) {
+    assert.equal(validateActivityMetadata(metadata({ version })).version, version);
+  }
+});
+
 test('validates discovery metadata and excluded URL patterns', () => {
   const expanded = metadata({
     aliases: ['YT Music', 'YTM'],
@@ -77,6 +87,35 @@ test('validates declarative Activity settings for boolean, select, string, and n
   assert.throws(() => validateActivityMetadata(metadata({ settings: [{ ...settings[0], enabled: true }] })), /unsupported field/);
 });
 
+test('accepts optional status labels and rejects unsupported or empty UI metadata', () => {
+  const settingsUi = { statusLabels: { app: 'YouTube Music', artist: 'Artist', track: 'Song title' } };
+  assert.deepEqual(validateActivityMetadata(metadata({ settingsUi })).settingsUi, settingsUi);
+  assert.equal(validateActivityMetadata(metadata()).settingsUi, undefined);
+  for (const invalid of [
+    null,
+    { statusLabels: null },
+    { statusLabels: { creator: 'Creator' } },
+    { statusLabels: { track: '   ' } },
+    { statusLabels: { track: 'x'.repeat(81) } },
+    { statusLabels: { track: 42 } },
+    { other: true },
+  ]) {
+    assert.throws(() => validateActivityMetadata(metadata({ settingsUi: invalid })), /settingsUi/);
+  }
+});
+
+test('navigation grace is a bounded opt-in metadata option for V1 and V2', () => {
+  for (const apiVersion of [1, 2]) {
+    for (const navigationGraceMs of [0, 1500, 4000, 5000]) {
+      const value = validateActivityMetadata(metadata({ apiVersion, presence: { kind: 'generic', navigationGraceMs } }));
+      assert.equal(value.presence.navigationGraceMs, navigationGraceMs);
+    }
+    for (const navigationGraceMs of [-1, 5001, 1.5, '4000', null]) {
+      assert.throws(() => validateActivityMetadata(metadata({ apiVersion, presence: { navigationGraceMs } })), /navigationGraceMs/);
+    }
+  }
+});
+
 test('enforces Activity source size and non-empty content', () => {
   assert.equal(validateActivitySource('globalThis.started = true;'), 'globalThis.started = true;');
   assert.throws(() => validateActivitySource('  '), /non-empty JavaScript/);
@@ -99,6 +138,31 @@ test('normalizes a bounded HTTPS Activity report', () => {
     buttons: [{ label: 'Open', url: 'https://music.example.com/watch?id=1' }],
     visibility: 'normal',
   });
+});
+
+test('normalizes clickable presence text and artwork URLs', () => {
+  const report = normalizeActivityReport({
+    kind: 'song',
+    media: { title: 'Track', artist: 'Artist', album: 'Album' },
+    display: {
+      detailsUrl: 'https://music.example.com/watch?v=1',
+      stateUrl: 'https://music.example.com/artist/1',
+    },
+    artwork: {
+      large: 'https://cdn.example.com/cover.png',
+      largeUrl: 'https://music.example.com/album/1',
+    },
+  });
+  assert.equal(report.display.detailsUrl, 'https://music.example.com/watch?v=1');
+  assert.equal(report.display.stateUrl, 'https://music.example.com/artist/1');
+  assert.equal(report.artwork.largeUrl, 'https://music.example.com/album/1');
+  for (const [section, field] of [
+    ['display', 'detailsUrl'], ['display', 'stateUrl'], ['artwork', 'largeUrl'],
+  ]) {
+    assert.throws(() => normalizeActivityReport({
+      kind: 'song', media: { title: 'Track' }, [section]: { [field]: 'javascript:alert(1)' },
+    }), /HTTPS URL/);
+  }
 });
 
 test('supplies kind-specific display defaults and normalized playback defaults', () => {
@@ -127,6 +191,27 @@ test('rejects unsafe URLs, invalid kinds, visibility values, and undeclared repo
   }), /visibility must be/);
 });
 
+test('both APIs validate opt-in status overrides and second-line suppression', () => {
+  for (const apiVersion of [1, 2]) {
+    const report = { kind: 'generic', media: { title: 'Browsing' } };
+    for (const statusDisplayOverride of ['name', 'state', 'details']) {
+      const normalized = normalizeActivityReport({ ...report, display: { statusDisplayOverride, hideState: true } }, apiVersion);
+      assert.equal(normalized.display.statusDisplayOverride, statusDisplayOverride);
+      assert.equal(normalized.display.hideState, true);
+    }
+    const unchanged = normalizeActivityReport(report, apiVersion);
+    assert.equal(Object.hasOwn(unchanged.display, 'statusDisplayOverride'), false);
+    assert.equal(Object.hasOwn(unchanged.display, 'hideState'), false);
+    assert.equal(normalizeActivityReport({ ...report, display: { hideState: false } }, apiVersion).display.hideState, false);
+    for (const statusDisplayOverride of ['', 'app', true, null, 1]) {
+      assert.throws(() => normalizeActivityReport({ ...report, display: { statusDisplayOverride } }, apiVersion), /statusDisplayOverride/);
+    }
+    for (const hideState of ['', 'false', null, 0, 1, {}]) {
+      assert.throws(() => normalizeActivityReport({ ...report, display: { hideState } }, apiVersion), /hideState/);
+    }
+  }
+});
+
 test('enforces nested field limits, playback values, and the two-button maximum', () => {
   assert.throws(() => normalizeActivityReport({ kind: 'movie', media: { title: 'x'.repeat(257) } }), /media.title/);
   assert.throws(() => normalizeActivityReport({
@@ -139,4 +224,25 @@ test('enforces nested field limits, playback values, and the two-button maximum'
       { label: '3', url: 'https://example.com/3' },
     ],
   }), /at most two/);
+});
+
+test('v2 supports bounded mode names and elapsed generic pages while v1 rejects those fields', () => {
+  const report = {
+    kind: 'generic', media: { title: 'query' },
+    display: { name: 'Google Images', details: 'Searching for : query', state: '', statusDisplay: 'name' },
+    playback: { state: 'playing', elapsed: true, position: 12 },
+  };
+  const normalized = normalizeActivityReport(report, 2);
+  assert.equal(normalized.display.name, 'Google Images');
+  assert.equal(normalized.display.state, '');
+  assert.equal(normalized.playback.elapsed, true);
+  assert.throws(() => normalizeActivityReport(report, 1), /unsupported field/);
+  for (const name of ['', ' ', 42, null, 'x'.repeat(257)]) {
+    assert.throws(() => normalizeActivityReport({ ...report, display: { name } }, 2), /display.name/);
+  }
+  for (const playback of [{ elapsed: 'true' }, { elapsed: true, live: true }, { elapsed: true, duration: 12 }]) {
+    assert.throws(() => normalizeActivityReport({ ...report, playback }, 2), /elapsed|Elapsed/);
+  }
+  assert.throws(() => normalizeActivityReport({ ...report, kind: 'video' }, 2), /Elapsed/);
+  assert.throws(() => normalizeActivityReport({ kind: 'generic', media: { title: 'query' }, display: { name: 'Google' } }, 1), /unsupported field/);
 });

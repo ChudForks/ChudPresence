@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>Activity Library · ChudPresence Lab</title>
+    <link rel="stylesheet" href="activities.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="popup.html" aria-label="ChudPresence Lab home">
+        <img src="icons/icon48.png" alt="" />
+        <span><strong>ChudPresence Lab</strong><small>Activity Library</small></span>
+      </a>
+      <div class="header-status"><i id="status-dot"></i><span id="page-status" role="status">Loading installed Activities…</span></div>
+    </header>
+
+    <main class="shell">
+      <section class="hero">
+        <div><h1>Activity Library</h1>
+          <p>Find and manage activities for the sites you use.</p>
+        </div>
+        <button class="button secondary" id="refresh-catalog" type="button">Refresh catalog</button>
+      </section>
+
+      <nav class="tabs" aria-label="Activity Library sections">
+        <button class="tab is-active" data-view="discover" type="button">Discover</button>
+        <button class="tab" data-view="installed" type="button">Installed <span id="installed-count">0</span></button>
+        <button class="tab" data-view="updates" type="button">Updates <span id="update-count">0</span></button>
+        <button class="tab" data-view="developer" type="button">Developer</button>
+      </nav>
+
+      <section class="view" id="discover-view" aria-labelledby="discover-title">
+        <div class="view-heading"><h2 id="discover-title">Discover</h2><span class="muted" id="catalog-age"></span></div>
+        <div class="filters">
+          <label class="search"><span class="visually-hidden">Search Activities</span><input id="search" type="search" placeholder="Search Activities…" autocomplete="off" /></label>
+          <label class="category-filter"><span class="visually-hidden">Filter by category</span><select id="category-filter"><option value="all">All categories</option></select></label>
+        </div>
+        <div class="notice" id="catalog-notice" role="status">Connect to the GitHub catalog to discover Activities.</div>
+        <div class="card-grid" id="discover-list"></div>
+      </section>
+
+      <section class="view" id="installed-view" aria-labelledby="installed-title" hidden>
+        <div class="view-heading"><h2 id="installed-title">Installed</h2></div>
+        <div class="card-grid" id="installed-list"></div>
+      </section>
+
+      <section class="view" id="updates-view" aria-labelledby="updates-title" hidden>
+        <div class="view-heading"><h2 id="updates-title">Updates</h2></div>
+        <div class="card-grid" id="updates-list"></div>
+      </section>
+
+      <section class="view" id="developer-view" aria-labelledby="developer-title" hidden>
+        <div class="view-heading"><h2 id="developer-title">Developer Mode</h2></div>
+        <label class="developer-toggle"><span><strong>Enable developer tools</strong><small>Show Activity logs and local package loading on this browser.</small></span><input id="developer-enabled" type="checkbox" /></label>
+        <div class="developer-panel" id="developer-panel" hidden>
+          <section class="developer-console" aria-labelledby="developer-logs-title">
+            <div class="console-heading"><div><h3 id="developer-logs-title">Activity logs</h3><p>Choose an Activity to inspect its logs, network requests, and playback diagnostics.</p></div><span class="console-count" id="developer-log-count">0 entries</span></div>
+            <div class="console-filters">
+              <label>Activity<select id="developer-log-activity"><option value="">All Activities</option></select></label>
+              <label>Show<select id="developer-log-kind"><option value="all">All diagnostics</option><option value="logs">Activity logs</option><option value="network">Network requests</option><option value="snapshots">Playback &amp; runtime</option></select></label>
+              <label>Log level<select id="developer-log-level"><option value="all">All levels</option><option value="debug">Debug</option><option value="info">Info</option><option value="warn">Warnings</option><option value="error">Errors</option></select></label>
+            </div>
+            <div class="console-toolbar">
+              <div class="console-actions"><button class="button primary" id="developer-copy-logs" type="button">Copy visible</button><button class="button secondary" id="developer-select-logs" type="button">Select all</button><button class="button secondary" id="developer-clear-logs" type="button">Clear all history</button></div>
+              <label class="console-pause"><input id="developer-pause-logs" type="checkbox" />Pause updates</label>
+            </div>
+            <textarea class="console-output" id="developer-log-output" aria-label="Activity diagnostic logs" readonly spellcheck="false" wrap="off" rows="20">No diagnostic history yet.</textarea>
+            <div class="console-footer"><span class="muted" id="developer-log-update">Updates every 3 seconds. Selecting text holds the view.</span><span class="console-feedback" id="developer-log-status" role="status" aria-live="polite"></span></div>
+            <p class="console-help">Clear history starts a fresh testing session for the selected Activity. New entries continue to arrive while playback runs.</p>
+          </section>
+          <h3>Load a local Activity</h3>
+          <p>For public V2 Activities, select <code>metadata.json</code> and <code>activity.json</code>. ChudPresence reads the selected media fields; the package contains no executable JavaScript. Trusted V1 development uses <code>activity.js</code> and allows arbitrary page inspection. Add <code>icon.png</code> when declared. Local Activities stay on this device.</p>
+          <label class="file-picker">Activity files<input id="local-files" type="file" accept=".json,.js,.png,application/json,text/javascript,image/png" multiple /></label>
+          <div class="selected-files" id="selected-files">Choose both required files to continue.</div>
+          <button class="button primary" id="load-local" type="button" disabled>Load local Activity</button>
+          <div class="notice" id="developer-notice" role="status"></div>
+          <section aria-labelledby="lookup-services-title">
+            <h3 id="lookup-services-title">Trusted lookup services</h3>
+            <p>Approve a service policy separately to allow V2 media lookups. Review its exact destination and the media fields it sends. Activities cannot add destinations themselves. Approve policies only from a source you trust.</p>
+            <label class="file-picker">Service policy JSON<input id="lookup-service-file" type="file" accept=".json,application/json" /></label>
+            <button class="button secondary" id="lookup-service-review" type="button" disabled>Review service policy</button>
+            <div id="lookup-services-list"></div>
+            <div class="notice" id="lookup-service-notice" role="status"></div>
+          </section>
+        </div>
+        <div class="developer-guide">
+          <h3>Activity API V2</h3>
+          <p>Describe media selection, fields, player state and presentation in JSON. ChudPresence performs inspection and updates presence. Each installation and update requires review. V2 lookups require a separately approved service policy.</p>
+          <a href="ACTIVITY_API_V2.md" target="_blank" rel="noopener">Read the V2 developer guide</a>
+          <h3>Trusted Activity API V1</h3>
+          <p>Scripts run in an isolated Chromium <code>USER_SCRIPT</code> world. Chrome 138 and newer may require <strong>Allow User Scripts</strong> on this extension’s details page. An Activity may report from the top page or, when configured, matching embedded frames. Use Activity logs above to filter, copy, and clear diagnostic history. Installed cards also offer View logs and Reload Activity.</p>
+          <pre><code>ChudPresence.report({
+  kind: "episode",
+  media: {
+    title: "Episode title",
+    series: "Series name",
+    season: 1,
+    episode: 3
+  },
+  playback: { state: "playing", position: 120, duration: 1440 },
+  buttons: [{ label: "Watch", url: location.href }]
+});</code></pre>
+          <a href="ACTIVITY_API.md" target="_blank" rel="noopener">Read the Activity API guide</a>
+        </div>
+      </section>
+
+    <footer class="trust-note">
+      <strong>Review before installing</strong>
+      <span>Activities can read pages on the sites you approve. They run separately from ChudPresence and Discord credentials; each Activity report is checked by the extension.</span>
+    </footer>
+    </main>
+
+    <dialog class="user-scripts-dialog" id="user-scripts-dialog" aria-labelledby="user-scripts-title">
+      <div class="dialog-content">
+        <span class="eyebrow">One-time Chrome setting</span>
+        <h2 id="user-scripts-title">Allow Activity scripts</h2>
+        <p>Chrome is blocking Activity scripts until you enable the required setting for this extension.</p>
+        <ol>
+          <li>Open Chrome’s Extensions page.</li>
+          <li>Chrome 138 or newer: open this extension’s Details and turn on <strong>Allow User Scripts</strong>. Earlier versions: turn on <strong>Developer mode</strong>.</li>
+          <li>Return here and reload the Activity Library.</li>
+        </ol>
+        <div class="dialog-actions">
+          <button class="button secondary" id="close-user-scripts-dialog" type="button">Close</button>
+          <button class="button primary" id="open-extension-details" type="button">Open Chrome Extensions</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog class="user-scripts-dialog" id="v2-approval-dialog" aria-labelledby="v2-approval-title">
+      <div class="dialog-content">
+        <h2 id="v2-approval-title">Review Activity access</h2>
+        <pre id="v2-access-summary" style="white-space: pre-wrap; overflow-wrap: anywhere; max-height: 50vh; overflow: auto"></pre>
+        <div class="dialog-actions">
+          <button class="button secondary" id="decline-v2" type="button">Cancel</button>
+          <button class="button primary" id="approve-v2" type="button">Approve installation</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog class="user-scripts-dialog" id="lookup-service-dialog" aria-labelledby="lookup-service-review-title">
+      <div class="dialog-content">
+        <h2 id="lookup-service-review-title">Review lookup service</h2>
+        <pre id="lookup-service-summary" style="white-space: pre-wrap; overflow-wrap: anywhere; max-height: 45vh; overflow: auto"></pre>
+        <label id="lookup-service-token-label" hidden>Service access token<input id="lookup-service-token" type="password" autocomplete="off" spellcheck="false" /></label>
+        <p>The token stays in extension storage and is used only for this approved service.</p>
+        <div class="dialog-actions">
+          <button class="button secondary" id="lookup-service-cancel" type="button">Cancel</button>
+          <button class="button primary" id="lookup-service-approve" type="button">Approve service</button>
+        </div>
+      </div>
+    </dialog>
+
+    <script type="module" src="activities.js"></script>
+  </body>
+</html>

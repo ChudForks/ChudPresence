@@ -69,10 +69,14 @@ async function tokenRequest(parameters) {
     throw new Error(result.error_description || result.message || `Discord OAuth failed (${response.status}).`);
   }
 
+  const expiresIn = Number(result.expires_in);
+  const lifetimeSeconds = Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : 3600;
+  // Refresh early without extending a short-lived token past its expiration.
+  const refreshMarginSeconds = Math.min(60, lifetimeSeconds / 10);
   auth = {
     accessToken: result.access_token,
     refreshToken: result.refresh_token || auth?.refreshToken || '',
-    expiresAt: Date.now() + Math.max(60, Number(result.expires_in) - 60 || 3540) * 1000,
+    expiresAt: Date.now() + (lifetimeSeconds - refreshMarginSeconds) * 1000,
     scope: result.scope || SCOPES.join(' '),
     user: auth?.user || null,
   };
@@ -145,7 +149,11 @@ export async function discordRequest(path, options = {}, retry = true) {
 
   const result = await response.json().catch(() => ({}));
   if (response.status === 429) throw rateLimitErrorFromResponse(response, result);
-  if (!response.ok) throw new Error(result.message || `Discord API failed (${response.status}).`);
+  if (!response.ok) {
+    const error = new Error(result.message || `Discord API failed (${response.status}).`);
+    error.status = response.status;
+    throw error;
+  }
   return result;
 }
 

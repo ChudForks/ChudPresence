@@ -2,6 +2,115 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createPresenceIntent } from '../extension/core/presence.js';
 import { normalizeActivityReport } from '../extension/core/activity-validator.js';
+import { buildHeadlessActivity } from '../extension/discord/activity-builder.js';
+
+test('V1 and V2 browsing can override the saved status line and omit all second-line fallbacks', () => {
+  for (const apiVersion of [1, 2]) {
+    const report = normalizeActivityReport({
+      kind: 'generic', media: { title: 'Browsing Anikoto', creator: 'Fallback creator' },
+      display: { details: 'Browsing Anikoto', state: '', statusDisplayOverride: 'name', hideState: true,
+        stateUrl: 'https://example.com/creator' },
+      artwork: { large: 'https://anikototv.to/AnikotoTheme/assets/images/favicon.png', largeText: 'Anikoto' },
+    }, apiVersion);
+    for (const statusDisplay of ['app', 'artist', 'track']) {
+      const settings = { statusDisplay };
+      const intent = createPresenceIntent({ ...report, activityName: 'Anikoto', activityId: 'anikoto' }, 100_000, settings);
+      assert.equal(intent.statusDisplayType, 'name');
+      assert.equal(intent.name, 'Anikoto');
+      assert.equal(intent.details, 'Browsing Anikoto');
+      assert.equal(intent.state, '');
+      assert.equal(intent.stateUrl, undefined);
+      assert.equal(intent.assets.largeImage, report.artwork.large);
+      assert.deepEqual(settings, { statusDisplay });
+      const activity = buildHeadlessActivity(intent, '1549066134706323548');
+      assert.equal(activity.status_display_type, 0);
+      assert.equal(Object.hasOwn(activity, 'state'), false);
+      assert.equal(Object.hasOwn(activity, 'state_url'), false);
+    }
+  }
+});
+
+test('display controls are opt-in and a later playback report restores saved preferences', () => {
+  for (const apiVersion of [1, 2]) {
+    const playback = normalizeActivityReport({
+      kind: 'episode', media: { title: 'Episode 9', series: 'Yani Neko' },
+      display: { details: 'Yani Neko', state: 'Episode 9' },
+      playback: { state: 'paused', position: 120, duration: 1422 },
+    }, apiVersion);
+    const intent = createPresenceIntent({ ...playback, activityName: 'Anikoto' }, 100_000, { statusDisplay: 'track' });
+    assert.equal(intent.statusDisplayType, 'details');
+    assert.equal(intent.state, 'Episode 9 • Paused');
+    const explicitFalse = createPresenceIntent({ ...playback, display: { ...playback.display, hideState: false } }, 100_000);
+    assert.equal(explicitFalse.state, 'Episode 9 • Paused');
+    const hidden = createPresenceIntent({ ...playback, display: { ...playback.display, hideState: true } }, 100_000);
+    assert.equal(hidden.state, '');
+    for (const statusDisplayOverride of ['name', 'state', 'details']) {
+      const overridden = createPresenceIntent({ ...playback, display: { ...playback.display, statusDisplayOverride } }, 100_000, { statusDisplay: 'app' });
+      assert.equal(overridden.statusDisplayType, statusDisplayOverride);
+    }
+  }
+});
+
+test('generic v2 pages preserve mode names, empty state and elapsed time through Discord formatting', () => {
+  const report = normalizeActivityReport({
+    kind: 'generic', media: { title: 'test' },
+    display: { name: 'Google Images', details: 'Searching for : test', state: '', statusDisplay: 'name' },
+    playback: { state: 'playing', elapsed: true, position: 11 },
+    artwork: { large: 'https://www.google.com/images/branding/googleg/2x/googleg_standard_color_128dp.png', largeText: 'Google' },
+  }, 2);
+  const intent = createPresenceIntent({ ...report, activityName: 'Google', activityId: 'google' }, 100_000);
+  assert.equal(intent.name, 'Google Images');
+  assert.equal(intent.details, 'Searching for : test');
+  assert.equal(intent.type, 'playing');
+  assert.equal(intent.state, '');
+  assert.equal(intent.statusDisplayType, 'name');
+  assert.deepEqual(intent.timestamps, { start: 89 });
+  const activity = buildHeadlessActivity(intent, '1549066134706323548');
+  assert.equal(activity.name, 'Google Images');
+  assert.equal(activity.type, 0);
+  assert.equal(Object.hasOwn(activity, 'state'), false);
+  assert.deepEqual(activity.timestamps, { start: 89000 });
+  const hidden = createPresenceIntent(report, 100_000, { showArtwork: false, showTimestamps: false });
+  assert.equal(hidden.assets, null);
+  assert.equal(hidden.timestamps, null);
+});
+
+test('explicitly empty artwork text omits the music card album line through the V1 pipeline', () => {
+  for (const album of [undefined, 'Stale album metadata']) {
+    const report = normalizeActivityReport({
+      kind: 'song',
+      media: { title: 'Boulevard of Broken Dreams', artist: 'Green Day', ...(album ? { album } : {}) },
+      playback: { state: 'playing', position: 168, duration: 260 },
+      artwork: {
+        large: 'https://cdn.example.com/cover.png',
+        largeText: '',
+        largeUrl: 'https://soundcloud.com/green-day/boulevard-of-broken-dreams',
+      },
+    });
+    assert.equal(report.artwork.largeText, '');
+    const intent = createPresenceIntent({ ...report, activityName: 'SoundCloud' }, 1_000_000);
+    const activity = buildHeadlessActivity(intent, '123456789012345678');
+    assert.equal(intent.assets.largeText, '');
+    assert.equal(activity.details, 'Boulevard of Broken Dreams');
+    assert.equal(activity.state, 'Green Day');
+    assert.equal(Object.hasOwn(activity.assets, 'large_text'), false);
+    assert.equal(activity.assets.large_image, report.artwork.large);
+    assert.equal(activity.assets.large_url, report.artwork.largeUrl);
+    assert.deepEqual(activity.timestamps, { start: 832000, end: 1092000 });
+  }
+});
+
+test('omitted artwork text retains the album or title fallback', () => {
+  for (const album of [undefined, 'An Album']) {
+    const report = normalizeActivityReport({
+      kind: 'song', media: { title: 'A Song', ...(album ? { album } : {}) },
+      artwork: { large: 'https://cdn.example.com/cover.png' },
+    });
+    const intent = createPresenceIntent({ ...report, activityName: 'Music' });
+    const activity = buildHeadlessActivity(intent, '123456789012345678');
+    assert.equal(activity.assets.large_text, album || 'A Song');
+  }
+});
 
 function intentWithoutSource(intent) {
   const { source, ...formatting } = intent;
@@ -61,6 +170,36 @@ test('formats normalized Activity reports independently of their registered Acti
   assert.deepEqual(first.buttons, [{ label: 'Watch', url: 'https://watch.example.com/episode/3' }]);
 });
 
+test('passes clickable song, artist, and album URLs through the presence intent', () => {
+  const intent = createPresenceIntent({
+    ...normalizeActivityReport({
+      kind: 'song',
+      media: { title: 'Track', artist: 'Artist', album: 'Album' },
+      display: {
+        detailsUrl: 'https://music.example.com/watch?v=1',
+        stateUrl: 'https://music.example.com/artist/1',
+      },
+      artwork: {
+        large: 'https://cdn.example.com/cover.png',
+        largeUrl: 'https://music.example.com/album/1',
+      },
+    }),
+    activityName: 'Music',
+  }, 1_000_000);
+  assert.equal(intent.detailsUrl, 'https://music.example.com/watch?v=1');
+  assert.equal(intent.stateUrl, 'https://music.example.com/artist/1');
+  assert.equal(intent.assets.largeUrl, 'https://music.example.com/album/1');
+
+  const hiddenArtwork = createPresenceIntent({
+    ...normalizeActivityReport({
+      kind: 'song', media: { title: 'Track' },
+      artwork: { largeUrl: 'https://music.example.com/album/1' },
+    }),
+    activityName: 'Music',
+  }, 1_000_000, { showArtwork: false });
+  assert.equal(hiddenArtwork.assets, null);
+});
+
 test('uses generic song, movie, and stream report semantics', () => {
   const song = createPresenceIntent({
     ...normalizeActivityReport({ kind: 'song', media: { title: 'Song', artist: 'Artist', album: 'Album' } }),
@@ -85,8 +224,8 @@ test('uses generic song, movie, and stream report semantics', () => {
     }),
     activityName: 'Stream Activity',
   }, 1_000_000);
-  assert.equal(stream.type, 'streaming');
-  assert.equal(stream.streamUrl, 'https://stream.example.com/live');
+  assert.equal(stream.type, 'watching');
+  assert.equal(stream.streamUrl, undefined);
   assert.equal(stream.state, 'Creator • Live');
 });
 
@@ -115,6 +254,33 @@ test('applies installed Activity status, artwork, timer, and button preferences'
   assert.deepEqual(intent.buttons, []);
 });
 
+test('forwards a paused album-art badge as the small image', () => {
+  const intent = createPresenceIntent({
+    activityId: 'youtube-music',
+    activityName: 'YouTube Music',
+    kind: 'song',
+    media: { title: 'A Song', artist: 'An Artist', album: 'An Album' },
+    playback: { state: 'paused', position: 12, duration: 180 },
+    display: { details: 'A Song', state: 'An Artist' },
+    artwork: {
+      large: 'https://example.com/cover.png',
+      largeText: 'An Album',
+      small: 'https://example.com/pause.png',
+      smallText: 'Paused',
+    },
+    visibility: 'normal',
+  }, 1_000_000);
+
+  assert.equal(intent.timestamps, null);
+  assert.equal(intent.state, 'An Artist • Paused');
+  assert.deepEqual(intent.assets, {
+    largeImage: 'https://example.com/cover.png',
+    largeText: 'An Album',
+    smallImage: 'https://example.com/pause.png',
+    smallText: 'Paused',
+  });
+});
+
 test('omits timers while paused and rejects unsafe URLs', () => {
   const intent = createPresenceIntent({
     kind: 'episode',
@@ -134,29 +300,23 @@ test('omits timers while paused and rejects unsafe URLs', () => {
   assert.equal(intent.state, 'Episode title • Paused');
 });
 
-test('uses YouTube layouts for videos, Shorts, and live streams', () => {
+test('uses generic Activity reports for YouTube Shorts and live streams', () => {
   const short = createPresenceIntent({
+    activityId: 'youtube',
     activityName: 'YouTube',
-    presenceKind: 'video',
-    source: 'youtube',
-    kind: 'short',
-    title: 'A Short',
-    artist: 'A Creator',
-    artwork: 'https://example.com/short.jpg',
-    url: 'https://www.youtube.com/shorts/abcdefghijk',
-    channelUrl: 'https://www.youtube.com/@creator',
-    display: {
-      details: 'A Short', state: 'A Creator', largeText: 'A Short',
-      statusFields: { app: 'name', creator: 'state', video: 'details' },
-    },
-    buttons: [
-      { label: 'Watch Short', url: 'https://www.youtube.com/shorts/abcdefghijk' },
-      { label: 'View channel', url: 'https://www.youtube.com/@creator' },
-    ],
-    playing: true,
-    position: 5,
-    duration: 20,
-  }, 1_000_000, { statusDisplay: 'creator' });
+    source: 'activity',
+    ...normalizeActivityReport({
+      kind: 'video',
+      media: { title: 'A Short', creator: 'A Creator' },
+      playback: { state: 'playing', position: 5, duration: 20 },
+      display: { details: 'A Short', state: 'A Creator' },
+      artwork: { large: 'https://example.com/short.jpg', largeText: 'A Short' },
+      buttons: [
+        { label: 'Watch Short', url: 'https://www.youtube.com/shorts/abcdefghijk' },
+        { label: 'View channel', url: 'https://www.youtube.com/@creator' },
+      ],
+    }),
+  }, 1_000_000, { statusDisplay: 'artist' });
 
   assert.equal(short.name, 'YouTube');
   assert.equal(short.details, 'A Short');
@@ -168,20 +328,17 @@ test('uses YouTube layouts for videos, Shorts, and live streams', () => {
   ]);
 
   const live = createPresenceIntent({
+    activityId: 'youtube',
     activityName: 'YouTube',
-    presenceKind: 'streaming',
-    source: 'youtube',
-    kind: 'live',
-    live: true,
-    title: 'Live now',
-    artist: 'A Channel',
-    playing: true,
-    position: 90,
-    display: {
-      details: 'Live now', state: 'A Channel',
-      statusFields: { app: 'name', creator: 'state', video: 'details' },
-    },
-  }, 1_000_000, { statusDisplay: 'video' });
+    source: 'activity',
+    ...normalizeActivityReport({
+      kind: 'stream',
+      media: { title: 'Live now', creator: 'A Channel' },
+      playback: { state: 'playing', position: 90, live: true },
+      display: { details: 'Live now', state: 'A Channel' },
+      buttons: [{ label: 'Watch on YouTube', url: 'https://www.youtube.com/watch?v=abcdefghijk' }],
+    }),
+  }, 1_000_000, { statusDisplay: 'track' });
 
   assert.equal(live.state, 'A Channel • Live');
   assert.equal(live.statusDisplayType, 'details');
@@ -227,6 +384,60 @@ test('uses Activity-authored Crunchyroll display overrides without a provider br
   assert.deepEqual(movie.buttons, [
     { label: 'Watch movie', url: 'https://www.crunchyroll.com/watch/MOVIE123' },
   ]);
+});
+
+test('uses Activity-authored 67Movies display without a provider branch', () => {
+  const episode = createPresenceIntent({
+    activityId: '67movies',
+    activityName: '67Movies',
+    source: 'activity',
+    ...normalizeActivityReport({
+      kind: 'episode',
+      media: {
+        title: 'Episode title',
+        series: 'Series name',
+        season: 2,
+        episode: 4,
+        subtitle: 'Season 2, Episode 4',
+      },
+      display: { details: 'Series name', state: 'Season 2, Episode 4' },
+      artwork: {
+        large: 'https://image.tmdb.org/t/p/w500/still.jpg',
+        largeText: 'Season 2, Episode 4 • Episode title',
+      },
+      buttons: [
+        { label: 'Watch on 67Movies', url: 'https://67movies.st/watch/tv/123/2/4' },
+        { label: 'Open 67Movies', url: 'https://67movies.st/' },
+      ],
+    }),
+  }, 1_000_000);
+
+  assert.equal(episode.name, '67Movies');
+  assert.equal(episode.type, 'watching');
+  assert.equal(episode.details, 'Series name');
+  assert.equal(episode.state, 'Season 2, Episode 4');
+  assert.equal(episode.assets.largeText, 'Season 2, Episode 4 • Episode title');
+  assert.deepEqual(episode.buttons, [
+    { label: 'Watch on 67Movies', url: 'https://67movies.st/watch/tv/123/2/4' },
+    { label: 'Open 67Movies', url: 'https://67movies.st/' },
+  ]);
+
+  const movie = createPresenceIntent({
+    activityId: '67movies',
+    activityName: '67Movies',
+    source: 'activity',
+    ...normalizeActivityReport({
+      kind: 'movie',
+      media: { title: 'Example Movie', subtitle: '2024' },
+      buttons: [
+        { label: 'Watch movie', url: 'https://67movies.st/watch/movie/456' },
+        { label: 'Open 67Movies', url: 'https://67movies.st/' },
+      ],
+    }),
+  });
+  assert.equal(movie.details, 'Example Movie');
+  assert.equal(movie.state, '67Movies');
+  assert.equal(movie.buttons[0].label, 'Watch movie');
 });
 
 test('uses dedicated 67Movies episode and movie layouts', () => {
@@ -286,28 +497,23 @@ test('uses dedicated 67Movies episode and movie layouts', () => {
   ]);
 });
 
-test('uses a dedicated Twitch stream layout', () => {
+test('uses a generic Activity report for Twitch live presence', () => {
   const live = createPresenceIntent({
+    activityId: 'twitch',
     activityName: 'Twitch',
-    presenceKind: 'streaming',
-    source: 'twitch',
-    kind: 'live',
-    live: true,
-    title: 'Ranked with friends',
-    artist: 'Streamer',
-    artwork: 'https://static-cdn.jtvnw.net/preview.jpg',
-    url: 'https://www.twitch.tv/streamer',
-    channelUrl: 'https://www.twitch.tv/streamer',
-    playing: true,
-    position: 75,
-    display: {
-      details: 'Ranked with friends', state: 'Streamer', largeText: 'Ranked with friends',
-      statusFields: { app: 'name', streamer: 'state', stream: 'details' },
-    },
+    source: 'activity',
+    kind: 'stream',
+    media: { title: 'Ranked with friends', creator: 'Streamer' },
+    playback: { state: 'playing', position: 75, duration: 0, live: true },
+    artwork: { large: 'https://static-cdn.jtvnw.net/preview.jpg', largeText: 'Ranked with friends' },
+    display: { details: 'Ranked with friends', state: 'Streamer', statusDisplay: 'details' },
     buttons: [{ label: 'Watch on Twitch', url: 'https://www.twitch.tv/streamer' }],
-  }, 1_000_000, { statusDisplay: 'streamer' });
+    visibility: 'normal',
+  }, 1_000_000, { statusDisplay: 'artist' });
 
   assert.equal(live.name, 'Twitch');
+  assert.equal(live.type, 'watching');
+  assert.equal(live.streamUrl, undefined);
   assert.equal(live.state, 'Streamer • Live');
   assert.equal(live.statusDisplayType, 'state');
   assert.deepEqual(live.timestamps, { start: 925 });
@@ -316,29 +522,23 @@ test('uses a dedicated Twitch stream layout', () => {
   ]);
 });
 
-test('uses a dedicated Kick stream layout', () => {
+test('uses a generic Activity report for Kick VOD presence', () => {
   const vod = createPresenceIntent({
+    activityId: 'kick',
     activityName: 'Kick',
     presenceKind: 'video',
-    source: 'kick',
+    source: 'activity',
     kind: 'video',
-    title: 'A past broadcast',
-    artist: 'Streamer',
-    artwork: 'https://images.kick.com/video.jpg',
-    url: 'https://kick.com/streamer/videos/01234567-89ab-cdef-0123-456789abcdef',
-    channelUrl: 'https://kick.com/streamer',
-    playing: true,
-    position: 40,
-    duration: 120,
-    display: {
-      details: 'A past broadcast', state: 'Streamer', largeText: 'A past broadcast',
-      statusFields: { app: 'name', streamer: 'state', stream: 'details' },
-    },
+    media: { title: 'A past broadcast', creator: 'Streamer' },
+    playback: { state: 'playing', position: 40, duration: 120, live: false },
+    artwork: { large: 'https://images.kick.com/video.jpg', largeText: 'A past broadcast' },
+    display: { details: 'A past broadcast', state: 'Streamer', statusDisplay: 'details' },
     buttons: [
       { label: 'Watch on Kick', url: 'https://kick.com/streamer/videos/01234567-89ab-cdef-0123-456789abcdef' },
       { label: 'Visit channel', url: 'https://kick.com/streamer' },
     ],
-  }, 1_000_000, { statusDisplay: 'stream' });
+    visibility: 'normal',
+  }, 1_000_000, { statusDisplay: 'track' });
 
   assert.equal(vod.name, 'Kick');
   assert.equal(vod.details, 'A past broadcast');

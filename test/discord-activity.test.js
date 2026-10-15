@@ -30,6 +30,48 @@ test('maps a presence intent to the headless session activity shape', () => {
   });
 });
 
+test('maps a paused album-art badge to the small Discord image', () => {
+  const activity = buildHeadlessActivity({
+    name: 'YouTube Music',
+    type: 'listening',
+    details: 'A Song',
+    state: 'An Artist • Paused',
+    assets: {
+      largeImage: 'https://example.com/cover.png',
+      largeText: 'An Album',
+      smallImage: 'https://example.com/pause.png',
+      smallText: 'Paused',
+    },
+  }, '123456789012345678');
+
+  assert.equal(activity.type, 2);
+  assert.deepEqual(activity.assets, {
+    large_image: 'https://example.com/cover.png',
+    large_text: 'An Album',
+    small_image: 'https://example.com/pause.png',
+    small_text: 'Paused',
+  });
+});
+
+test('maps clickable music fields to Discord activity URLs', () => {
+  const activity = buildHeadlessActivity({
+    name: 'Music',
+    type: 'listening',
+    details: 'Track',
+    detailsUrl: 'https://music.example.com/watch?v=1',
+    state: 'Artist',
+    stateUrl: 'https://music.example.com/artist/1',
+    assets: {
+      largeImage: 'https://cdn.example.com/cover.png',
+      largeText: 'Album',
+      largeUrl: 'https://music.example.com/album/1',
+    },
+  }, '123456789012345678');
+  assert.equal(activity.details_url, 'https://music.example.com/watch?v=1');
+  assert.equal(activity.state_url, 'https://music.example.com/artist/1');
+  assert.equal(activity.assets.large_url, 'https://music.example.com/album/1');
+});
+
 test('rejects invalid application IDs and maps listening activities', () => {
   assert.equal(buildHeadlessActivity({ details: 'Track' }, ''), null);
   assert.equal(buildHeadlessActivity({ details: 'Track' }, 'not-a-snowflake'), null);

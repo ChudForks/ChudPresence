@@ -1,0 +1,1204 @@
+{
+  "schemaVersion": 2,
+  "kind": "video",
+  "scope": "[data-e2e=\"recommend-list-item-container\"]",
+  "paths": [
+    "/",
+    "/foryou",
+    "/foryou/",
+    "/following",
+    "/following/",
+    "/{locale}",
+    "/{locale}/",
+    "/{handle}/video/{number}",
+    "/{handle}/video/{number}/"
+  ],
+  "fields": {
+    "title": {
+      "source": "dom.text",
+      "selectors": [
+        "[data-e2e=\"video-desc\"]",
+        "[data-e2e=\"browse-video-desc\"]"
+      ],
+      "ignoreEmptyBreaks": true
+    },
+    "creator": {
+      "source": "first",
+      "rules": [
+        {
+          "source": "dom.text",
+          "selectors": [
+            "[data-e2e=\"video-author-nickname\"]",
+            "[class*=\"DivCreatorInfoContainer\"] a p",
+            "[data-e2e=\"user-profile-nickname\"]"
+          ]
+        },
+        {
+          "source": "dom.text",
+          "selectors": [
+            "[data-e2e=\"browser-nickname\"] [class*=\"SpanNickName\"]",
+            "[data-e2e=\"browser-nickname\"] [class*=\"SpanEllipsis\"]"
+          ]
+        },
+        {
+          "source": "dom.text",
+          "selectors": [
+            "[data-e2e=\"browser-nickname\"]"
+          ],
+          "split": {
+            "separator": " · ",
+            "index": 0
+          }
+        }
+      ]
+    },
+    "channel": {
+      "source": "first",
+      "rules": [
+        {
+          "source": "dom.text",
+          "selectors": [
+            "[data-e2e=\"video-author-uniqueid\"]",
+            "[data-e2e=\"browse-username\"]",
+            "[data-e2e=\"user-profile-uid\"]"
+          ],
+          "parse": "handle"
+        },
+        {
+          "source": "public-path",
+          "selectors": [
+            "[class*=\"DivCreatorInfoContainer\"] a"
+          ],
+          "paths": [
+            "/{handle}",
+            "/{handle}/",
+            "/{handle}/live",
+            "/{handle}/live/",
+            "/{handle}/video/{number}",
+            "/{handle}/video/{number}/"
+          ],
+          "segment": 0,
+          "pageFallback": true
+        }
+      ]
+    }
+  },
+  "requiredFields": [
+    "creator",
+    "channel"
+  ],
+  "player": {
+    "adapter": "html-media",
+    "selectors": [
+      "video"
+    ],
+    "selection": "largest-visible",
+    "canvasSelector": "tt-vod-sr-wrap > canvas",
+    "canvasContainer": ".tiktok-web-player",
+    "live": false
+  },
+  "pageIdentity": {
+    "paths": [
+      "/{handle}/video/{number}",
+      "/{handle}/video/{number}/"
+    ],
+    "fields": {
+      "channel": 0
+    },
+    "ignoreCase": true
+  },
+  "links": {
+    "media": {
+      "paths": [
+        "/{handle}/video/{number}"
+      ],
+      "matchFields": {
+        "channel": 0
+      },
+      "sources": [
+        {
+          "source": "page"
+        },
+        {
+          "source": "dom.link",
+          "selectors": [
+            "a"
+          ]
+        },
+        {
+          "source": "template",
+          "path": "/{channel}/video/{id}",
+          "playerId": {
+            "selector": ".tiktok-web-player",
+            "split": {
+              "separator": "-",
+              "index": 2
+            },
+            "prefixes": [
+              "xgwrapper-",
+              "video-player-"
+            ],
+            "parts": 3
+          }
+        }
+      ]
+    },
+    "profile": {
+      "paths": [
+        "/{handle}"
+      ],
+      "matchFields": {
+        "channel": 0
+      },
+      "sources": [
+        {
+          "source": "template",
+          "path": "/{channel}"
+        }
+      ]
+    }
+  },
+  "presentation": {
+    "details": "{title}",
+    "state": "{creator} ({channel})",
+    "artwork": {
+      "large": "https://play-lh.googleusercontent.com/2o7iuqPe-0msP3DvNhzoOgNo4eZ6GkL_RtGVeKyBn5UBQAW5cw-GW5V3wDOHB1yTQuqWzrFLFOv2u4_5ea1uhg=s512",
+      "largeText": "TikTok"
+    },
+    "buttons": [
+      {
+        "label": "View TikTok",
+        "link": "media"
+      },
+      {
+        "label": "View Profile",
+        "link": "profile"
+      }
+    ]
+  },
+  "modes": [
+    {
+      "id": "overlay",
+      "paths": [
+        "/{handle}/video/{number}",
+        "/{handle}/video/{number}/"
+      ],
+      "kind": "video",
+      "scope": "[data-e2e=\"browse-video\"]",
+      "fields": {
+        "title": {
+          "source": "dom.text",
+          "selectors": [
+            "[data-e2e=\"browse-video-desc\"]"
+          ],
+          "ignoreEmptyBreaks": true,
+          "maxDescendants": 64
+        },
+        "creator": {
+          "source": "dom.text",
+          "selectors": [
+            "[data-e2e=\"browse-username\"]"
+          ]
+        },
+        "channel": {
+          "source": "first",
+          "rules": [
+            {
+              "source": "dom.text",
+              "selectors": [
+                "[data-e2e=\"browser-nickname\"] [class*=\"SpanNickName\"]",
+                "[data-e2e=\"browser-nickname\"] [class*=\"SpanEllipsis\"]"
+              ],
+              "parse": "handle"
+            },
+            {
+              "source": "dom.text",
+              "selectors": [
+                "[data-e2e=\"browser-nickname\"]"
+              ],
+              "split": {
+                "separator": " · ",
+                "index": 0
+              },
+              "parse": "handle"
+            }
+          ]
+        }
+      },
+      "requiredFields": [
+        "creator",
+        "channel"
+      ],
+      "player": {
+        "adapter": "html-media",
+        "selectors": [
+          "video"
+        ],
+        "selection": "largest-visible",
+        "canvasSelector": "tt-vod-sr-wrap > canvas",
+        "canvasContainer": ".tiktok-web-player",
+        "live": false
+      },
+      "pageIdentity": {
+        "paths": [
+          "/{handle}/video/{number}",
+          "/{handle}/video/{number}/"
+        ],
+        "fields": {
+          "channel": 0
+        },
+        "playerId": {
+          "selector": ".tiktok-web-player",
+          "split": {
+            "separator": "-",
+            "index": 2
+          },
+          "prefixes": [
+            "xgwrapper-",
+            "video-player-"
+          ],
+          "parts": 3
+        },
+        "segment": 2,
+        "ignoreCase": true
+      },
+      "links": {
+        "media": {
+          "paths": [
+            "/{handle}/video/{number}"
+          ],
+          "matchFields": {
+            "channel": 0
+          },
+          "sources": [
+            {
+              "source": "page"
+            },
+            {
+              "source": "dom.link",
+              "selectors": [
+                "a"
+              ]
+            },
+            {
+              "source": "template",
+              "path": "/{channel}/video/{id}",
+              "playerId": {
+                "selector": ".tiktok-web-player",
+                "split": {
+                  "separator": "-",
+                  "index": 2
+                },
+                "prefixes": [
+                  "xgwrapper-",
+                  "video-player-"
+                ],
+                "parts": 3
+              }
+            }
+          ]
+        },
+        "profile": {
+          "paths": [
+            "/{handle}"
+          ],
+          "matchFields": {
+            "channel": 0
+          },
+          "sources": [
+            {
+              "source": "template",
+              "path": "/{channel}"
+            }
+          ]
+        }
+      },
+      "presentation": {
+        "details": "{title}",
+        "state": "{creator} ({channel})",
+        "artwork": {
+          "large": "https://play-lh.googleusercontent.com/2o7iuqPe-0msP3DvNhzoOgNo4eZ6GkL_RtGVeKyBn5UBQAW5cw-GW5V3wDOHB1yTQuqWzrFLFOv2u4_5ea1uhg=s512",
+          "largeText": "TikTok"
+        },
+        "buttons": [
+          {
+            "label": "View TikTok",
+            "link": "media"
+          },
+          {
+            "label": "View Profile",
+            "link": "profile"
+          }
+        ]
+      },
+      "container": {
+        "ancestors": 5,
+        "required": [
+          "[data-e2e=\"browse-video-desc\"]",
+          "[data-e2e=\"browser-nickname\"]",
+          "[data-e2e=\"browse-username\"]"
+        ],
+        "exclude": [
+          "#app"
+        ]
+      }
+    },
+    {
+      "id": "live-room",
+      "paths": [
+        "/live",
+        "/live/",
+        "/{handle}/live",
+        "/{handle}/live/"
+      ],
+      "kind": "stream",
+      "scope": "[data-e2e=\"live-room-content\"]",
+      "container": {
+        "ancestors": 1,
+        "required": [
+          "[data-e2e=\"live-header-container\"]"
+        ],
+        "exclude": [
+          "#app"
+        ]
+      },
+      "fields": {
+        "title": {
+          "source": "dom.text",
+          "selectors": [
+            "[data-e2e=\"user-profile-live-title\"]"
+          ],
+          "fallback": "TikTok LIVE"
+        },
+        "creator": {
+          "source": "dom.text",
+          "selectors": [
+            "[data-e2e=\"live-header-container\"] [data-e2e=\"room-header-anchor-name\"]"
+          ]
+        },
+        "channel": {
+          "source": "public-path",
+          "selectors": [
+            "[data-e2e=\"live-header-container\"] a"
+          ],
+          "paths": [
+            "/{handle}",
+            "/{handle}/",
+            "/{handle}/live",
+            "/{handle}/live/",
+            "/{handle}/video/{number}",
+            "/{handle}/video/{number}/"
+          ],
+          "segment": 0
+        }
+      },
+      "requiredFields": [
+        "creator",
+        "channel"
+      ],
+      "player": {
+        "adapter": "html-media",
+        "selectors": [
+          "video"
+        ],
+        "selection": "largest-visible",
+        "live": true,
+        "elapsed": true
+      },
+      "pageIdentity": {
+        "paths": [
+          "/{handle}/live",
+          "/{handle}/live/"
+        ],
+        "fields": {
+          "channel": 0
+        },
+        "ignoreCase": true
+      },
+      "links": {
+        "media": {
+          "paths": [
+            "/{handle}/live"
+          ],
+          "matchFields": {
+            "channel": 0
+          },
+          "sources": [
+            {
+              "source": "template",
+              "path": "/{channel}/live"
+            }
+          ]
+        },
+        "profile": {
+          "paths": [
+            "/{handle}"
+          ],
+          "matchFields": {
+            "channel": 0
+          },
+          "sources": [
+            {
+              "source": "template",
+              "path": "/{channel}"
+            }
+          ]
+        }
+      },
+      "presentation": {
+        "details": "Watching Live",
+        "state": "{creator}",
+        "artwork": {
+          "large": "https://play-lh.googleusercontent.com/2o7iuqPe-0msP3DvNhzoOgNo4eZ6GkL_RtGVeKyBn5UBQAW5cw-GW5V3wDOHB1yTQuqWzrFLFOv2u4_5ea1uhg=s512",
+          "largeText": "TikTok"
+        },
+        "liveInDetails": true,
+        "buttons": [
+          {
+            "label": "Watch Stream",
+            "link": "media"
+          },
+          {
+            "label": "View Profile",
+            "link": "profile"
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-featured",
+      "paths": [
+        "/live",
+        "/live/",
+        "/{handle}/live",
+        "/{handle}/live/"
+      ],
+      "kind": "stream",
+      "scope": "[data-e2e=\"discover-list-live-card\"]",
+      "fields": {
+        "title": {
+          "source": "dom.text",
+          "selectors": [
+            ".e1xspjl31"
+          ],
+          "opacityAncestor": ".ee35qag0"
+        },
+        "creator": {
+          "source": "dom.text",
+          "selectors": [
+            ".e1xspjl34"
+          ],
+          "opacityAncestor": ".ee35qag0"
+        },
+        "channel": {
+          "source": "public-path",
+          "selectors": [
+            ".ee35qag0 a"
+          ],
+          "paths": [
+            "/{handle}",
+            "/{handle}/",
+            "/{handle}/live",
+            "/{handle}/live/",
+            "/{handle}/video/{number}",
+            "/{handle}/video/{number}/"
+          ],
+          "segment": 0,
+          "opacityAncestor": ".ee35qag0"
+        }
+      },
+      "requiredFields": [
+        "creator",
+        "channel"
+      ],
+      "player": {
+        "adapter": "html-media",
+        "selectors": [
+          "video"
+        ],
+        "selection": "largest-visible",
+        "live": true,
+        "elapsed": true
+      },
+      "pageIdentity": {
+        "paths": [
+          "/{handle}/live",
+          "/{handle}/live/"
+        ],
+        "fields": {
+          "channel": 0
+        },
+        "ignoreCase": true
+      },
+      "links": {
+        "media": {
+          "paths": [
+            "/{handle}/live"
+          ],
+          "matchFields": {
+            "channel": 0
+          },
+          "sources": [
+            {
+              "source": "template",
+              "path": "/{channel}/live"
+            }
+          ]
+        },
+        "profile": {
+          "paths": [
+            "/{handle}"
+          ],
+          "matchFields": {
+            "channel": 0
+          },
+          "sources": [
+            {
+              "source": "template",
+              "path": "/{channel}"
+            }
+          ]
+        }
+      },
+      "presentation": {
+        "details": "Watching Live",
+        "state": "{creator}",
+        "artwork": {
+          "large": "https://play-lh.googleusercontent.com/2o7iuqPe-0msP3DvNhzoOgNo4eZ6GkL_RtGVeKyBn5UBQAW5cw-GW5V3wDOHB1yTQuqWzrFLFOv2u4_5ea1uhg=s512",
+          "largeText": "TikTok"
+        },
+        "liveInDetails": true,
+        "buttons": [
+          {
+            "label": "Watch Stream",
+            "link": "media"
+          },
+          {
+            "label": "View Profile",
+            "link": "profile"
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-player",
+      "paths": [
+        "/live",
+        "/live/",
+        "/{handle}/live",
+        "/{handle}/live/"
+      ],
+      "kind": "stream",
+      "scope": "[class*=\"DivLivePlayerContainer\"]",
+      "fields": {
+        "title": {
+          "source": "first",
+          "rules": [
+            {
+              "source": "dom.text",
+              "selectors": [
+                "[data-e2e=\"user-profile-live-title\"]"
+              ]
+            },
+            {
+              "source": "dom.text",
+              "selectors": [
+                "[class*=\"DivDetailsLine\"]"
+              ],
+              "candidateIndex": 1
+            }
+          ]
+        },
+        "creator": {
+          "source": "dom.text",
+          "selectors": [
+            "[data-e2e=\"user-profile-nickname\"]",
+            "[class*=\"SpanNickName\"]"
+          ]
+        },
+        "channel": {
+          "source": "first",
+          "rules": [
+            {
+              "source": "dom.text",
+              "selectors": [
+                "[data-e2e=\"user-profile-uid\"]"
+              ],
+              "parse": "handle"
+            },
+            {
+              "source": "public-path",
+              "selectors": [
+                "a"
+              ],
+              "paths": [
+                "/{handle}",
+                "/{handle}/",
+                "/{handle}/live",
+                "/{handle}/live/",
+                "/{handle}/video/{number}",
+                "/{handle}/video/{number}/"
+              ],
+              "segment": 0,
+              "pageFallback": true
+            }
+          ]
+        }
+      },
+      "requiredFields": [
+        "creator",
+        "channel"
+      ],
+      "player": {
+        "adapter": "html-media",
+        "selectors": [
+          "video"
+        ],
+        "selection": "largest-visible",
+        "live": true,
+        "elapsed": true
+      },
+      "pageIdentity": {
+        "paths": [
+          "/{handle}/live",
+          "/{handle}/live/"
+        ],
+        "fields": {
+          "channel": 0
+        },
+        "ignoreCase": true
+      },
+      "links": {
+        "media": {
+          "paths": [
+            "/{handle}/live"
+          ],
+          "matchFields": {
+            "channel": 0
+          },
+          "sources": [
+            {
+              "source": "template",
+              "path": "/{channel}/live"
+            }
+          ]
+        },
+        "profile": {
+          "paths": [
+            "/{handle}"
+          ],
+          "matchFields": {
+            "channel": 0
+          },
+          "sources": [
+            {
+              "source": "template",
+              "path": "/{channel}"
+            }
+          ]
+        }
+      },
+      "presentation": {
+        "details": "Watching Live",
+        "state": "{creator}",
+        "artwork": {
+          "large": "https://play-lh.googleusercontent.com/2o7iuqPe-0msP3DvNhzoOgNo4eZ6GkL_RtGVeKyBn5UBQAW5cw-GW5V3wDOHB1yTQuqWzrFLFOv2u4_5ea1uhg=s512",
+          "largeText": "TikTok"
+        },
+        "liveInDetails": true,
+        "buttons": [
+          {
+            "label": "Watch Stream",
+            "link": "media"
+          },
+          {
+            "label": "View Profile",
+            "link": "profile"
+          }
+        ]
+      }
+    },
+    {
+      "id": "live-content",
+      "paths": [
+        "/live",
+        "/live/",
+        "/{handle}/live",
+        "/{handle}/live/"
+      ],
+      "kind": "stream",
+      "scope": "[class*=\"DivLiveContent\"]",
+      "fields": {
+        "title": {
+          "source": "first",
+          "rules": [
+            {
+              "source": "dom.text",
+              "selectors": [
+                "[data-e2e=\"user-profile-live-title\"]"
+              ]
+            },
+            {
+              "source": "dom.text",
+              "selectors": [
+                "[class*=\"DivDetailsLine\"]"
+              ],
+              "candidateIndex": 1
+            }
+          ]
+        },
+        "creator": {
+          "source": "dom.text",
+          "selectors": [
+            "[data-e2e=\"user-profile-nickname\"]",
+            "[class*=\"SpanNickName\"]"
+          ]
+        },
+        "channel": {
+          "source": "first",
+          "rules": [
+            {
+              "source": "dom.text",
+              "selectors": [
+                "[data-e2e=\"user-profile-uid\"]"
+              ],
+              "parse": "handle"
+            },
+            {
+              "source": "public-path",
+              "selectors": [
+                "a"
+              ],
+              "paths": [
+                "/{handle}",
+                "/{handle}/",
+                "/{handle}/live",
+                "/{handle}/live/",
+                "/{handle}/video/{number}",
+                "/{handle}/video/{number}/"
+              ],
+              "segment": 0,
+              "pageFallback": true
+            }
+          ]
+        }
+      },
+      "requiredFields": [
+        "creator",
+        "channel"
+      ],
+      "player": {
+        "adapter": "html-media",
+        "selectors": [
+          "video"
+        ],
+        "selection": "largest-visible",
+        "live": true,
+        "elapsed": true
+      },
+      "pageIdentity": {
+        "paths": [
+          "/{handle}/live",
+          "/{handle}/live/"
+        ],
+        "fields": {
+          "channel": 0
+        },
+        "ignoreCase": true
+      },
+      "links": {
+        "media": {
+          "paths": [
+            "/{handle}/live"
+          ],
+          "matchFields": {
+            "channel": 0
+          },
+          "sources": [
+            {
+              "source": "template",
+              "path": "/{channel}/live"
+            }
+          ]
+        },
+        "profile": {
+          "paths": [
+            "/{handle}"
+          ],
+          "matchFields": {
+            "channel": 0
+          },
+          "sources": [
+            {
+              "source": "template",
+              "path": "/{channel}"
+            }
+          ]
+        }
+      },
+      "presentation": {
+        "details": "Watching Live",
+        "state": "{creator}",
+        "artwork": {
+          "large": "https://play-lh.googleusercontent.com/2o7iuqPe-0msP3DvNhzoOgNo4eZ6GkL_RtGVeKyBn5UBQAW5cw-GW5V3wDOHB1yTQuqWzrFLFOv2u4_5ea1uhg=s512",
+          "largeText": "TikTok"
+        },
+        "liveInDetails": true,
+        "buttons": [
+          {
+            "label": "Watch Stream",
+            "link": "media"
+          },
+          {
+            "label": "View Profile",
+            "link": "profile"
+          }
+        ]
+      }
+    },
+    {
+      "id": "detail",
+      "paths": [
+        "/{handle}/video/{number}",
+        "/{handle}/video/{number}/"
+      ],
+      "kind": "video",
+      "scope": "[class*=\"DivVideoDetailContainer\"]",
+      "fields": {
+        "title": {
+          "source": "dom.text",
+          "selectors": [
+            "[data-e2e=\"video-desc\"]",
+            "[data-e2e=\"browse-video-desc\"]"
+          ],
+          "ignoreEmptyBreaks": true
+        },
+        "creator": {
+          "source": "first",
+          "rules": [
+            {
+              "source": "dom.text",
+              "selectors": [
+                "[data-e2e=\"video-author-nickname\"]",
+                "[class*=\"DivCreatorInfoContainer\"] a p",
+                "[data-e2e=\"user-profile-nickname\"]"
+              ]
+            },
+            {
+              "source": "dom.text",
+              "selectors": [
+                "[data-e2e=\"browser-nickname\"] [class*=\"SpanNickName\"]",
+                "[data-e2e=\"browser-nickname\"] [class*=\"SpanEllipsis\"]"
+              ]
+            },
+            {
+              "source": "dom.text",
+              "selectors": [
+                "[data-e2e=\"browser-nickname\"]"
+              ],
+              "split": {
+                "separator": " · ",
+                "index": 0
+              }
+            }
+          ]
+        },
+        "channel": {
+          "source": "first",
+          "rules": [
+            {
+              "source": "dom.text",
+              "selectors": [
+                "[data-e2e=\"video-author-uniqueid\"]",
+                "[data-e2e=\"browse-username\"]",
+                "[data-e2e=\"user-profile-uid\"]"
+              ],
+              "parse": "handle"
+            },
+            {
+              "source": "public-path",
+              "selectors": [
+                "[class*=\"DivCreatorInfoContainer\"] a"
+              ],
+              "paths": [
+                "/{handle}",
+                "/{handle}/",
+                "/{handle}/live",
+                "/{handle}/live/",
+                "/{handle}/video/{number}",
+                "/{handle}/video/{number}/"
+              ],
+              "segment": 0,
+              "pageFallback": true
+            }
+          ]
+        }
+      },
+      "requiredFields": [
+        "creator",
+        "channel"
+      ],
+      "player": {
+        "adapter": "html-media",
+        "selectors": [
+          "video"
+        ],
+        "selection": "largest-visible",
+        "canvasSelector": "tt-vod-sr-wrap > canvas",
+        "canvasContainer": ".tiktok-web-player",
+        "live": false
+      },
+      "pageIdentity": {
+        "paths": [
+          "/{handle}/video/{number}",
+          "/{handle}/video/{number}/"
+        ],
+        "fields": {
+          "channel": 0
+        },
+        "ignoreCase": true
+      },
+      "links": {
+        "media": {
+          "paths": [
+            "/{handle}/video/{number}"
+          ],
+          "matchFields": {
+            "channel": 0
+          },
+          "sources": [
+            {
+              "source": "page"
+            },
+            {
+              "source": "dom.link",
+              "selectors": [
+                "a"
+              ]
+            },
+            {
+              "source": "template",
+              "path": "/{channel}/video/{id}",
+              "playerId": {
+                "selector": ".tiktok-web-player",
+                "split": {
+                  "separator": "-",
+                  "index": 2
+                },
+                "prefixes": [
+                  "xgwrapper-",
+                  "video-player-"
+                ],
+                "parts": 3
+              }
+            }
+          ]
+        },
+        "profile": {
+          "paths": [
+            "/{handle}"
+          ],
+          "matchFields": {
+            "channel": 0
+          },
+          "sources": [
+            {
+              "source": "template",
+              "path": "/{channel}"
+            }
+          ]
+        }
+      },
+      "presentation": {
+        "details": "{title}",
+        "state": "{creator} ({channel})",
+        "artwork": {
+          "large": "https://play-lh.googleusercontent.com/2o7iuqPe-0msP3DvNhzoOgNo4eZ6GkL_RtGVeKyBn5UBQAW5cw-GW5V3wDOHB1yTQuqWzrFLFOv2u4_5ea1uhg=s512",
+          "largeText": "TikTok"
+        },
+        "buttons": [
+          {
+            "label": "View TikTok",
+            "link": "media"
+          },
+          {
+            "label": "View Profile",
+            "link": "profile"
+          }
+        ]
+      }
+    },
+    {
+      "id": "detail-main",
+      "paths": [
+        "/{handle}/video/{number}",
+        "/{handle}/video/{number}/"
+      ],
+      "kind": "video",
+      "scope": "#main-content-video",
+      "fields": {
+        "title": {
+          "source": "dom.text",
+          "selectors": [
+            "[data-e2e=\"video-desc\"]",
+            "[data-e2e=\"browse-video-desc\"]"
+          ],
+          "ignoreEmptyBreaks": true
+        },
+        "creator": {
+          "source": "first",
+          "rules": [
+            {
+              "source": "dom.text",
+              "selectors": [
+                "[data-e2e=\"video-author-nickname\"]",
+                "[class*=\"DivCreatorInfoContainer\"] a p",
+                "[data-e2e=\"user-profile-nickname\"]"
+              ]
+            },
+            {
+              "source": "dom.text",
+              "selectors": [
+                "[data-e2e=\"browser-nickname\"] [class*=\"SpanNickName\"]",
+                "[data-e2e=\"browser-nickname\"] [class*=\"SpanEllipsis\"]"
+              ]
+            },
+            {
+              "source": "dom.text",
+              "selectors": [
+                "[data-e2e=\"browser-nickname\"]"
+              ],
+              "split": {
+                "separator": " · ",
+                "index": 0
+              }
+            }
+          ]
+        },
+        "channel": {
+          "source": "first",
+          "rules": [
+            {
+              "source": "dom.text",
+              "selectors": [
+                "[data-e2e=\"video-author-uniqueid\"]",
+                "[data-e2e=\"browse-username\"]",
+                "[data-e2e=\"user-profile-uid\"]"
+              ],
+              "parse": "handle"
+            },
+            {
+              "source": "public-path",
+              "selectors": [
+                "[class*=\"DivCreatorInfoContainer\"] a"
+              ],
+              "paths": [
+                "/{handle}",
+                "/{handle}/",
+                "/{handle}/live",
+                "/{handle}/live/",
+                "/{handle}/video/{number}",
+                "/{handle}/video/{number}/"
+              ],
+              "segment": 0,
+              "pageFallback": true
+            }
+          ]
+        }
+      },
+      "requiredFields": [
+        "creator",
+        "channel"
+      ],
+      "player": {
+        "adapter": "html-media",
+        "selectors": [
+          "video"
+        ],
+        "selection": "largest-visible",
+        "canvasSelector": "tt-vod-sr-wrap > canvas",
+        "canvasContainer": ".tiktok-web-player",
+        "live": false
+      },
+      "pageIdentity": {
+        "paths": [
+          "/{handle}/video/{number}",
+          "/{handle}/video/{number}/"
+        ],
+        "fields": {
+          "channel": 0
+        },
+        "ignoreCase": true
+      },
+      "links": {
+        "media": {
+          "paths": [
+            "/{handle}/video/{number}"
+          ],
+          "matchFields": {
+            "channel": 0
+          },
+          "sources": [
+            {
+              "source": "page"
+            },
+            {
+              "source": "dom.link",
+              "selectors": [
+                "a"
+              ]
+            },
+            {
+              "source": "template",
+              "path": "/{channel}/video/{id}",
+              "playerId": {
+                "selector": ".tiktok-web-player",
+                "split": {
+                  "separator": "-",
+                  "index": 2
+                },
+                "prefixes": [
+                  "xgwrapper-",
+                  "video-player-"
+                ],
+                "parts": 3
+              }
+            }
+          ]
+        },
+        "profile": {
+          "paths": [
+            "/{handle}"
+          ],
+          "matchFields": {
+            "channel": 0
+          },
+          "sources": [
+            {
+              "source": "template",
+              "path": "/{channel}"
+            }
+          ]
+        }
+      },
+      "presentation": {
+        "details": "{title}",
+        "state": "{creator} ({channel})",
+        "artwork": {
+          "large": "https://play-lh.googleusercontent.com/2o7iuqPe-0msP3DvNhzoOgNo4eZ6GkL_RtGVeKyBn5UBQAW5cw-GW5V3wDOHB1yTQuqWzrFLFOv2u4_5ea1uhg=s512",
+          "largeText": "TikTok"
+        },
+        "buttons": [
+          {
+            "label": "View TikTok",
+            "link": "media"
+          },
+          {
+            "label": "View Profile",
+            "link": "profile"
+          }
+        ]
+      }
+    }
+  ]
+}

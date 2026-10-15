@@ -1,0 +1,4 @@
+# Deterministic v2 outputs must retain the builder's LF endings on Windows.
+extension/core/activity-v2-*.generated.js text eol=lf
+schemas/activity-api-v2.json text eol=lf
+schemas/activity-v2.schema.json text eol=lf

@@ -1,0 +1,18 @@
+{
+  "id": "example-video-v2",
+  "name": "Example Video v2",
+  "description": "A programmable sandboxed Activity for a site's public title and native player.",
+  "version": "1.0.0",
+  "apiVersion": 2,
+  "minExtensionVersion": "2.0.0",
+  "matches": ["https://example.com/*"],
+  "entry": "activity.js",
+  "pageAccess": {
+    "media": true,
+    "url": true,
+    "selectors": {
+      "title": { "selector": "h1", "read": "text" },
+      "artwork": { "selector": "meta[property='og:image']", "read": "attribute", "attribute": "content" }
+    }
+  }
+}

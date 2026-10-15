@@ -1,4 +1,5 @@
 import { validateActivitySettingDefinitions } from './activity-settings.js';
+import { validateActivityV2PageAccess } from './activity-v2-page.js';
 import {
   ACTIVITY_API_VERSION,
   ACTIVITY_ID_PATTERN,
@@ -22,9 +23,9 @@ import {
   REPORT_VISIBILITY_VALUES,
 } from './activity-contract.generated.js';
 
-export const LATEST_ACTIVITY_API_VERSION = ACTIVITY_API_VERSION;
+export const LATEST_ACTIVITY_API_VERSION = 2;
 export { ACTIVITY_API_VERSION, MAX_ACTIVITY_ICON_BYTES, MAX_ACTIVITY_REPORT_BYTES, MAX_ACTIVITY_SOURCE_BYTES };
-export const SUPPORTED_ACTIVITY_API_VERSIONS = CONTRACT_SUPPORTED_ACTIVITY_API_VERSIONS;
+export const SUPPORTED_ACTIVITY_API_VERSIONS = Object.freeze([...CONTRACT_SUPPORTED_ACTIVITY_API_VERSIONS, 2]);
 // Keep the original export for callers that need to generate current metadata.
 const ACTIVITY_ID = new RegExp(ACTIVITY_ID_PATTERN);
 const ACTIVITY_KINDS = new Set(ACTIVITY_KIND_VALUES);
@@ -124,7 +125,7 @@ export function isSemanticVersion(value) {
   if (typeof value !== 'string') return false;
   const match = value.match(SEMVER);
   if (!match) return false;
-  return !match[4] || match[4].split('.').every((identifier) =>
+  return !match[4] || match[4].slice(1).split('.').every((identifier) =>
     !/^\d+$/.test(identifier) || identifier === '0' || !identifier.startsWith('0'),
   );
 }
@@ -148,7 +149,9 @@ function protectedNetworkPattern(pattern) {
 export function validateActivityMetadata(metadata) {
   if (!isPlainObject(metadata)) fail('Activity metadata must be a JSON object.');
   for (const key of Object.keys(metadata)) {
-    if (!METADATA_FIELDS.has(key)) fail(`Activity metadata contains unsupported field ${key}.`);
+    if (!METADATA_FIELDS.has(key) && !(metadata.apiVersion === 2 && key === 'pageAccess')) {
+      fail(`Activity metadata contains unsupported field ${key}.`);
+    }
   }
   if (new TextEncoder().encode(JSON.stringify(metadata)).byteLength > MAX_ACTIVITY_METADATA_BYTES) {
     fail(`Activity metadata exceeds the ${Math.round(MAX_ACTIVITY_METADATA_BYTES / 1024)} KB size limit.`);
@@ -225,9 +228,29 @@ export function validateActivityMetadata(metadata) {
     if (metadata[field] !== undefined) cleanHttpsUrl(metadata[field], 'url');
   }
   if (metadata.presence !== undefined &&
-      (!isPlainObject(metadata.presence) || Object.keys(metadata.presence).some((key) => key !== 'kind') ||
+      (!isPlainObject(metadata.presence) || Object.keys(metadata.presence).some((key) =>
+        key !== 'kind' && key !== 'navigationGraceMs') ||
        (metadata.presence.kind !== undefined && !PRESENCE_KINDS.has(metadata.presence.kind)))) {
-    fail('Activity presence may contain only a supported kind.');
+    fail('Activity presence contains an unsupported field or kind.');
+  }
+  if (metadata.presence?.navigationGraceMs !== undefined &&
+      (!Number.isInteger(metadata.presence.navigationGraceMs) || metadata.presence.navigationGraceMs < 0 ||
+       metadata.presence.navigationGraceMs > 5000)) {
+    fail('Activity presence.navigationGraceMs must be an integer between 0 and 5000.');
+  }
+  if (metadata.settingsUi !== undefined) {
+    const ui = metadata.settingsUi;
+    if (!isPlainObject(ui) || Object.keys(ui).some((key) => key !== 'statusLabels')) {
+      fail('Activity settingsUi may contain only statusLabels.');
+    }
+    if (ui.statusLabels !== undefined) {
+      const labels = ui.statusLabels;
+      if (!isPlainObject(labels) || Object.entries(labels).some(([key, value]) =>
+        !['app', 'artist', 'track'].includes(key) || typeof value !== 'string' ||
+        !value.trim() || value.length > 80)) {
+        fail('Activity settingsUi.statusLabels must contain only app, artist, and track labels up to 80 characters.');
+      }
+    }
   }
   if (metadata.executionWorld !== undefined && metadata.executionWorld !== 'USER_SCRIPT') {
     fail('Only the isolated USER_SCRIPT execution world is currently supported.');
@@ -236,6 +259,7 @@ export function validateActivityMetadata(metadata) {
     fail('Activity frames must be top or all.');
   }
   const settings = validateActivitySettingDefinitions(metadata.settings ?? []);
+  const pageAccess = metadata.apiVersion === 2 ? validateActivityV2PageAccess(metadata.pageAccess) : undefined;
   return {
     ...metadata,
     id: metadata.id,
@@ -244,6 +268,7 @@ export function validateActivityMetadata(metadata) {
     matches: [...metadata.matches],
     network: [...network],
     settings,
+    ...(metadata.apiVersion === 2 ? { pageAccess } : {}),
     executionWorld: 'USER_SCRIPT',
     frames: metadata.frames || 'top',
   };
@@ -347,9 +372,23 @@ function normalizeDisplay(value, kind, media) {
     const cleaned = cleanText(value[field], `display.${field}`) || '';
     display[field] = cleaned;
   }
+  for (const field of ['detailsUrl', 'stateUrl']) {
+    const url = cleanHttpsUrl(value[field], `display.${field}`);
+    if (url) display[field] = url;
+  }
   display.statusDisplay = value.statusDisplay === undefined ? 'details' : value.statusDisplay;
   if (typeof display.statusDisplay !== 'string' || !REPORT_STATUS_DISPLAY.has(display.statusDisplay)) {
     fail('display.statusDisplay must be name, details, or state.');
+  }
+  if (value.statusDisplayOverride !== undefined) {
+    if (typeof value.statusDisplayOverride !== 'string' || !REPORT_STATUS_DISPLAY.has(value.statusDisplayOverride)) {
+      fail('display.statusDisplayOverride must be name, details, or state.');
+    }
+    display.statusDisplayOverride = value.statusDisplayOverride;
+  }
+  if (value.hideState !== undefined) {
+    if (typeof value.hideState !== 'boolean') fail('display.hideState must be a boolean.');
+    display.hideState = value.hideState;
   }
   return display;
 }
@@ -358,12 +397,12 @@ function normalizeArtwork(value) {
   if (value === undefined) value = {};
   normalizeReportTextObject(value, REPORT_ARTWORK_FIELDS, 'artwork');
   const artwork = {};
-  for (const field of ['large', 'small']) {
+  for (const field of ['large', 'largeUrl', 'small']) {
     const url = cleanHttpsUrl(value[field], `artwork.${field}`);
     if (url) artwork[field] = url;
   }
   for (const field of ['largeText', 'smallText']) {
-    const cleaned = cleanText(value[field], `artwork.${field}`);
+    const cleaned = value[field] === '' ? '' : cleanText(value[field], `artwork.${field}`);
     if (cleaned !== undefined) artwork[field] = cleaned;
   }
   return artwork;
@@ -411,8 +450,41 @@ function normalizeActivityReportV1(report) {
   return normalized;
 }
 
+function normalizeActivityReportV2(report) {
+  if (!isPlainObject(report)) fail('Activity report must be a JSON object.');
+  const input = { ...report };
+  let name;
+  let elapsed;
+  if (isPlainObject(report.display)) {
+    input.display = { ...report.display };
+    name = input.display.name;
+    delete input.display.name;
+  }
+  if (isPlainObject(report.playback)) {
+    input.playback = { ...report.playback };
+    elapsed = input.playback.elapsed;
+    delete input.playback.elapsed;
+  }
+  const normalized = normalizeActivityReportV1(input);
+  if (name !== undefined) {
+    normalized.display.name = cleanText(name, 'display.name', { required: true });
+  }
+  if (elapsed !== undefined) {
+    if (typeof elapsed !== 'boolean') fail('playback.elapsed must be a boolean.');
+    if (elapsed && (normalized.kind !== 'generic' || normalized.playback.live || normalized.playback.duration)) {
+      fail('Elapsed page activities require kind generic, no live playback, and no duration.');
+    }
+    normalized.playback.elapsed = elapsed;
+  }
+  if (new TextEncoder().encode(JSON.stringify(normalized)).byteLength > MAX_ACTIVITY_REPORT_BYTES) {
+    fail('Activity report exceeds the 16 KB size limit.');
+  }
+  return normalized;
+}
+
 const REPORT_NORMALIZERS = new Map([
   [1, normalizeActivityReportV1],
+  [2, normalizeActivityReportV2],
 ]);
 
 export function normalizeActivityReport(report, apiVersion = LATEST_ACTIVITY_API_VERSION) {
