@@ -1,0 +1,38 @@
+{
+  "id": "google",
+  "name": "Google",
+  "description": "Show the Google homepage, Search, Google Images and AI Mode with the submitted search query and elapsed time.",
+  "version": "1.0.1",
+  "apiVersion": 2,
+  "minExtensionVersion": "2.0.0",
+  "author": {
+    "name": "ChudForks"
+  },
+  "category": "utilities",
+  "defaultMediaKind": "generic",
+  "aliases": [
+    "Google Search",
+    "Google Images",
+    "Google AI"
+  ],
+  "tags": [
+    "search",
+    "images",
+    "ai"
+  ],
+  "serviceUrl": "https://www.google.com/",
+  "matches": [
+    "https://www.google.com/*",
+    "https://google.com/*"
+  ],
+  "entry": "activity.json",
+  "icon": "icon.png",
+  "frames": "top",
+  "settingsUi": {
+    "statusLabels": {
+      "app": "Google mode",
+      "artist": "Result summary",
+      "track": "Search query"
+    }
+  }
+}

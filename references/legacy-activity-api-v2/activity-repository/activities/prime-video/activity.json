@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "kind": "video",
+  "scope": ".dv-player-fullscreen",
+  "fields": {
+    "title": {
+      "source": "dom.text",
+      "selectors": [".atvwebplayersdk-title-text"]
+    },
+    "subtitle": {
+      "source": "dom.text",
+      "selectors": [".atvwebplayersdk-episode-info"]
+    }
+  },
+  "player": {
+    "adapter": "prime-video",
+    "metadata": "prime-video-details",
+    "selectors": [".atvwebplayersdk-video-surface video"]
+  }
+}

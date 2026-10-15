@@ -1,0 +1,149 @@
+{
+  "schemaVersion": 1,
+  "kind": "generic",
+  "scope": "#main",
+  "fields": {
+    "title": {
+      "source": "url.query",
+      "parameter": "q"
+    },
+    "subtitle": {
+      "source": "dom.text",
+      "selectors": [
+        "#result-stats"
+      ]
+    }
+  },
+  "page": {
+    "routes": [
+      {
+        "id": "search",
+        "name": "Google",
+        "paths": [
+          "/search"
+        ],
+        "query": {
+          "udm": [
+            "",
+            "14"
+          ],
+          "tbm": [
+            ""
+          ]
+        },
+        "requiredQuery": [
+          "q"
+        ],
+        "details": "Searching for : {title}",
+        "state": "{subtitle}"
+      },
+      {
+        "id": "images",
+        "name": "Google Images",
+        "paths": [
+          "/search",
+          "/images"
+        ],
+        "query": {
+          "udm": [
+            "2"
+          ],
+          "tbm": [
+            "",
+            "isch"
+          ]
+        },
+        "requiredQuery": [
+          "q"
+        ],
+        "details": "Searching for : {title}"
+      },
+      {
+        "id": "images-legacy",
+        "name": "Google Images",
+        "paths": [
+          "/search",
+          "/images"
+        ],
+        "query": {
+          "udm": [
+            ""
+          ],
+          "tbm": [
+            "isch"
+          ]
+        },
+        "requiredQuery": [
+          "q"
+        ],
+        "details": "Searching for : {title}"
+      },
+      {
+        "id": "images-path",
+        "name": "Google Images",
+        "paths": [
+          "/images"
+        ],
+        "query": {
+          "udm": [
+            ""
+          ],
+          "tbm": [
+            ""
+          ]
+        },
+        "requiredQuery": [
+          "q"
+        ],
+        "details": "Searching for : {title}"
+      },
+      {
+        "id": "ai",
+        "name": "Google AI",
+        "paths": [
+          "/search"
+        ],
+        "query": {
+          "udm": [
+            "50"
+          ],
+          "tbm": [
+            ""
+          ]
+        },
+        "requiredQuery": [
+          "q"
+        ],
+        "details": "Searching for : {title}"
+      },
+      {
+        "id": "homepage",
+        "name": "Google",
+        "paths": [
+          "/",
+          "/webhp"
+        ],
+        "query": {
+          "q": [
+            ""
+          ],
+          "udm": [
+            ""
+          ],
+          "tbm": [
+            ""
+          ]
+        },
+        "requiredQuery": [],
+        "scope": "#gbwa",
+        "title": "Homepage",
+        "details": "Homepage"
+      }
+    ],
+    "elapsed": true,
+    "artwork": {
+      "large": "https://www.google.com/images/branding/googleg/2x/googleg_standard_color_128dp.png",
+      "largeText": "Google"
+    }
+  }
+}

@@ -2,12 +2,15 @@
 
 This repository contains the **1.9.0 Manifest V3 Chromium development extension** for Activity API V1. It installs playback Activities, selects the current media, shows a local presence preview, and optionally publishes it to Discord. It is a separate development build from the original ChudPresence Solo Chrome release.
 
-## The two repositories in this workspace
+The previous declarative V2 implementation is retained as a [historical reference](references/legacy-activity-api-v2/README.md), including all five Activities, their presence construction, tests, and migration findings. The active extension has returned to the last baseline before V2 was introduced. A replacement V2 has not been implemented.
+
+## The repositories in this workspace
 
 | Checkout | Responsibility |
 | --- | --- |
 | This repository | Chromium runtime, Activity Library, popup, permissions, settings, Discord authorization and publishing, schemas, tests, and local packaging |
 | [`ChudPresence-Activities/`](ChudPresence-Activities/README.md) | Official first-party packages, generated catalog, canonical V1 contract and SDK types, authoring CLI, shared artwork, and package validation |
+| [`ChudPresence-Activities-V2/`](ChudPresence-Activities-V2/README.md) | Historical declarative V2 packages and tooling, preserved for reference until replacement Activities are available |
 
 `ChudPresence-Activities/` is a separate Git checkout ignored by this repository, not a submodule or part of the extension build. Its checked-out catalog contains **67Movies, Crunchyroll, Disney+, Hulu, Kick, SoundCloud, Twitch, YouTube, and YouTube Music**. Discover fetches the official `ChudForks/ChudPresence-Activities` catalog from GitHub; editing the local checkout does not change Discover. Use Developer mode to test local packages.
 

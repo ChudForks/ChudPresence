@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 2,
+  "kind": "video",
+  "scope": "[data-player=\"active\"]",
+  "fields": {
+    "title": { "source": "dom.text", "selectors": ["[data-media=\"title\"]", "h1"], "fallback": "Watching video" },
+    "creator": { "source": "dom.attribute", "selectors": ["[data-media=\"creator\"]"], "attribute": "title", "removePrefix": "Creator: " },
+    "category": { "source": "constant", "value": "Video" }
+  },
+  "player": { "adapter": "html-media", "selectors": ["video", "audio"], "selection": "largest-visible", "retainMetadata": true },
+  "presentation": {
+    "details": "{title}",
+    "state": "{creator}",
+    "artwork": { "large": "https://example.com/logo.png", "largeText": "Example" },
+    "buttons": [{ "label": "Visit Example", "url": "https://example.com/watch/" }]
+  }
+}
