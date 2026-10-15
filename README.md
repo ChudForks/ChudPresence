@@ -2,7 +2,7 @@
 
 The stable line on `master` is the **2.0.4 Manifest V3 Chromium extension**, with a programmable, sandboxed [Activity API v2](extension/ACTIVITY_API_V2.md) and continued trusted V1 support. V2 runs package JavaScript in an embedded QuickJS/WASM interpreter with declared, filtered page reads, scoped services, and resource limits. It installs playback Activities, selects current media, shows a local presence preview, and optionally publishes it to Discord. See the [2.0.4 release notes](RELEASE_NOTES.md) for validation and remaining limits.
 
-The previous declarative V2 implementation is retained as a [historical reference](references/legacy-activity-api-v2/README.md), including all five Activities, their presence construction, tests, and migration findings. Programmable V2 was developed on `codex/activity-api-v2-sandbox` and promoted into `master` with its commit history preserved. The V1 branch and the independent V1 Activities checkout are preserved. Future development branches start from `master`; stable releases use version tags.
+The previous declarative V2 implementation is kept as an ignored local snapshot. See [historical references](references/README.md) for recovery instructions and the remaining Roblox/TikTok migration references. Future development branches start from `master`; stable releases use version tags.
 
 ## The repositories in this workspace
 
@@ -10,9 +10,9 @@ The previous declarative V2 implementation is retained as a [historical referenc
 | --- | --- |
 | This repository | Chromium runtime, Activity Library, popup, permissions, settings, Discord authorization and publishing, schemas, tests, and local packaging |
 | [`ChudPresence-Activities/`](ChudPresence-Activities/README.md) | Official first-party packages, generated catalog, canonical V1 contract and SDK types, authoring CLI, shared artwork, and package validation |
-| [`ChudPresence-Activities-V2/`](ChudPresence-Activities-V2/README.md) | Independent programmable V2 packages, SDK tooling, generated catalog and tests; Prime Video, Google and Instagram browsing/Stories/Reels packages |
+| [`ChudPresence-Activities-V2/`](ChudPresence-Activities-V2/README.md) | Independent programmable V2 packages, SDK tooling, generated catalog and optional local tests; Prime Video, Google and Instagram browsing/Stories/Reels packages |
 
-`ChudPresence-Activities/` is a separate Git checkout ignored by this repository, not a submodule or part of the extension build. Its checked-out catalog contains **67Movies, Crunchyroll, Disney+, Hulu, Kick, SoundCloud, Twitch, YouTube, and YouTube Music**. Discover fetches the official `ChudForks/ChudPresence-Activities` catalog from GitHub; editing the local checkout does not change Discover. Use Developer mode to test local packages.
+`ChudPresence-Activities/` is a separate Git checkout ignored by this repository, not a submodule or part of the extension build. Its checked-out catalog contains **67Movies, Anikoto, Crunchyroll, Disney+, Hulu, Kick, SoundCloud, Twitch, YouTube, and YouTube Music**. Discover fetches the official `ChudForks/ChudPresence-Activities` catalog from GitHub; editing the local checkout does not change Discover. Use Developer mode to test local packages.
 
 The extension bundles a copy of the YouTube Activity for the first install. Once user scripts are available, it installs automatically. Disabling it is preserved across bundled updates; removing it prevents automatic reinstallation. Other Activities are installed through the Library.
 
@@ -55,7 +55,7 @@ Activity-authored song, artist, and album links can make Discord text and artwor
 
 ## Development gates
 
-Use Node.js 20 or newer as declared by both repositories; the latest checks used Node.js 24.21.0. Development uses pinned build dependencies; the extension ships the interpreter locally. Run from this repository:
+Use Node.js 20 or newer as declared by all three repositories; the latest checks used Node.js 24.21.0. Development uses pinned build dependencies; the extension ships the interpreter locally. Run from this repository:
 
 ```sh
 npm ci
@@ -72,14 +72,13 @@ npm ci
 npm run check:contract
 npm run check:catalog
 npm run typecheck
-npm test
-node tools/check-version-bumps.mjs
+node tools/check-version-bumps.mjs --base=origin/main
 ```
 
-The version-bump gate accepts `--base=<ref>` and otherwise uses GitHub event/base environment variables or `HEAD^`; use the intended review base. See the [Activities README](ChudPresence-Activities/README.md) and [verification record](TESTING.md) for the existing metadata/version discrepancy in this checkout.
+The version-bump gate accepts `--base=<ref>` and otherwise uses GitHub event/base environment variables or `HEAD^`; choose the intended review base. V1 and V2 package tests and their fixtures are optional local files ignored in their respective repositories. Run `npm test` there when those files are present; CI uses the tracked contract, type, catalog, syntax and version checks. See each repository README for its commands.
 
 `npm run check` validates the extension manifest and JavaScript, local contract outputs, and bundled YouTube files. When the Activities checkout is present, it also checks its generated contract and catalog hashes, compares canonical contract copies, and verifies bundled YouTube parity. Changes to the canonical contract belong in the Activities repository. Run `node tools/generate-api-contract.mjs` there to regenerate its outputs; in this workspace layout it also refreshes the lab's contract, schemas, and runtime constants. For standalone checkouts, synchronize those copies separately.
 
-`npm run build` replaces `dist/` with `ChudPresence-Chromium-Activity-Lab-2.0.4/` and its zip. A system `tar` executable is required for packaging. On Windows, `build.bat` runs the same three extension gates. Load `extension/` directly while debugging. `dist/`, `baseline/`, `browser-profiles/`, and the Activities checkout are ignored here. Building performs no publication.
+`npm run build` replaces `dist/` with `ChudPresence-Chromium-Activity-Lab-2.0.4/` and its zip. A system `tar` executable is required for packaging. On Windows, `build.bat` runs the same three extension gates. Load `extension/` directly while debugging. `dist/`, scratch browser profiles, both Activities checkouts, and the local historical snapshot are ignored here. Building performs no publication.
 
-See [architecture](ARCHITECTURE.md), [the Activity API guide](extension/ACTIVITY_API.md), [verification results](TESTING.md), [privacy details](PRIVACY.md), [the original baseline](BASELINE.md), and [porting status and remaining checks](PORTING_PLAN.md). Activity API V1 is intended for trusted first-party packages.
+See [architecture](ARCHITECTURE.md), [the Activity API V2 guide](extension/ACTIVITY_API_V2.md), [verification results](TESTING.md), [privacy details](PRIVACY.md), and [remaining browser checks](TESTING.md#remaining-browser-checks-before-distribution). The private V1 authoring guide remains in the [V1 Activities repository](ChudPresence-Activities/ACTIVITY_API.md).

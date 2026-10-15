@@ -72,7 +72,7 @@ Ordinary reports and clears schedule publication through a 250 ms debounce. If n
 
 `extension/popup.*` renders installed Activities dynamically with package names and icons, the local preview, Discord state, per-Activity presence preferences, and report/clear/cleanup diagnostics. The only global playback preference is `enabled`; retired provider-specific settings are removed during installation/update. **Restore default settings** resets the global switch; per-Activity preferences are stored separately. All Activities use the fixed Discord application ID in `extension/config.js`.
 
-The manifest has no provider content-script entries. Legacy provider files remain in `extension/` for reference but are not registered by this manifest. `extension/default-activities/youtube/` is the first-install YouTube package. Manifest-declared YouTube host access allows that default install without a separate site prompt. Its removal decision is persisted, bundled updates preserve its disabled state, and an installed local or repository replacement is not overwritten by the bundled copy.
+The manifest has no provider content-script entries. Provider detection lives in Activity packages. `extension/default-activities/youtube/` is the first-install YouTube package. Manifest-declared YouTube host access allows that default install without a separate site prompt. Its removal decision is persisted, bundled updates preserve its disabled state, and an installed local or repository replacement is not overwritten by the bundled copy.
 
 ## Discord transport and shutdown cleanup
 

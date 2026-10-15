@@ -16,7 +16,7 @@ the browser verification harness, with no additional shipped runtime changes.
 - V1 supports navigation handoff for packages that opt into navigation grace.
 - The Activity Library includes the accumulated installation, diagnostics,
   settings, scrolling and interaction improvements since the old master.
-- Historical declarative V2 packages remain available under `references/`.
+- Historical declarative V2 packages remain in the ignored local snapshot; see [recovery instructions](references/README.md).
 
 ## Validation
 
@@ -37,7 +37,7 @@ its default `HEAD^` base. See [TESTING.md](TESTING.md) for details and older che
 Stable status applies to the extension baseline. Synthetic browser fixtures do
 not certify every signed-in service, Chromium version, interactive permission
 flow or current Discord profile rendering. Discord's Headless Sessions
-transport remains experimental. The [remaining browser checks](PORTING_PLAN.md)
+transport remains experimental. The [remaining browser checks](TESTING.md#remaining-browser-checks-before-distribution)
 and [V2 security limits](extension/ACTIVITY_API_V2.md#security-limits-and-validation)
 still apply.
 

@@ -6,3 +6,6 @@ baseline/
 ChudPresence-Activities/
 ChudPresence-Activities-V2/
 browser-profiles/
+
+# Historical source remains local; recover it from tag v2.0.4 when needed.
+/references/legacy-activity-api-v2/

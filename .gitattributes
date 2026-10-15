@@ -1,4 +1,6 @@
-# Deterministic v2 outputs must retain the builder's LF endings on Windows.
+# Generated contracts must retain the builder's LF endings on Windows.
+extension/core/activity-contract.generated.js text eol=lf
 extension/core/activity-v2-*.generated.js text eol=lf
-schemas/activity-api-v2.json text eol=lf
-schemas/activity-v2.schema.json text eol=lf
+schemas/*.json text eol=lf
+extension/default-activities/**/*.js text eol=lf
+extension/default-activities/**/*.json text eol=lf
