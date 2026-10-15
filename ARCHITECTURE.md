@@ -1,4 +1,4 @@
-# Chromium Activity Lab architecture
+# ChudPresence architecture
 
 ## Activity API v2 sandbox
 
@@ -42,7 +42,7 @@ The broader native Activity wrapper described below applies to v1.
 
 ## Repository boundaries
 
-The lab owns the Chromium extension and its tests. The separate, locally nested `ChudPresence-Activities/` Git checkout owns the official packages, catalog, canonical Activity API V1 contract, generated schemas and SDK types, CLI, and shared artwork. It is ignored by the lab and is not included by the build. The lab carries contract copies under `schemas/` and `extension/core/activity-contract.generated.js`; `npm run check` validates them and compares them with the Activities checkout when present. It also checks the bundled YouTube package against that checkout.
+This repository owns the Chromium extension and its tests. The separate, locally nested `ChudPresence-Activities/` Git checkout owns the official packages, catalog, canonical Activity API V1 contract, generated schemas and SDK types, CLI, and shared artwork. It is ignored by this repository and is not included by the build. This repository carries contract copies under `schemas/` and `extension/core/activity-contract.generated.js`; `npm run check` validates them and compares them with the Activities checkout when present. It also checks the bundled YouTube package against that checkout.
 
 Discover uses `extension/core/activity-repository.js` to resolve the official repository's `main` commit, fetch its catalog and package files from that immutable revision, validate metadata, and verify SHA-256 hashes. Installed repository records retain their revision and hashes. Local Developer installs read user-selected files. Editing the local Activities checkout does not affect the remote catalog used by Discover.
 

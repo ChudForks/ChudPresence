@@ -1,9 +1,9 @@
 {
-  "name": "chudpresence-solo-extension",
+  "name": "chudpresence",
   "version": "2.0.4",
   "private": true,
   "type": "module",
-  "description": "Local Chromium MV3 sandboxed Activity API V2 lab for ChudPresence Solo, retaining V1 compatibility.",
+  "description": "Share your browsing and playback activity on Discord with customizable Activities.",
   "scripts": {
     "check": "node scripts/check.mjs && node scripts/build-v2-engine.mjs --check",
     "test": "node --test test/*.test.js",

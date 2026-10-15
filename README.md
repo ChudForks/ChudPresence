@@ -1,4 +1,6 @@
-# ChudPresence Chromium Activity Lab
+# ChudPresence
+
+ChudPresence shares your browsing and playback activity on Discord through customizable Activities.
 
 The stable line on `master` is the **2.0.4 Manifest V3 Chromium extension**, with a programmable, sandboxed [Activity API v2](extension/ACTIVITY_API_V2.md) and continued trusted V1 support. V2 runs package JavaScript in an embedded QuickJS/WASM interpreter with declared, filtered page reads, scoped services, and resource limits. It installs playback Activities, selects current media, shows a local presence preview, and optionally publishes it to Discord. See the [2.0.4 release notes](RELEASE_NOTES.md) for validation and remaining limits.
 
@@ -37,11 +39,11 @@ timeline and also supports ordinary video metadata on legacy `/video/` routes.
 Live Disney+ playback still needs browser verification; local tests use synthetic
 player fixtures.
 
-The popup lists installed Activities dynamically. Settings provides a global **Enable Activity Lab** switch and per-Activity enable, paused playback, status text, artwork, progress, and button preferences. Activity-defined settings are managed in the Library. Playing media takes priority over paused media, and the selected tab stays selected while eligible. Non-normal visibility produces no presence.
+The popup lists installed Activities dynamically. Settings provides a global **Enable ChudPresence** switch and per-Activity enable, paused playback, status text, artwork, progress, and button preferences. Activity-defined settings are managed in the Library. Playing media takes priority over paused media, and the selected tab stays selected while eligible. Non-normal visibility produces no presence.
 
 ## Optional Discord connection
 
-Playback detection and the local presence preview work without Discord. To publish, connect through the popup while **Enable Activity Lab** is on; sharing is enabled by default. The build uses the fixed public application ID `1549066134706323548`.
+Playback detection and the local presence preview work without Discord. To publish, connect through the popup while **Enable ChudPresence** is on; sharing is enabled by default. The build uses the fixed public application ID `1549066134706323548`.
 
 For an unpacked install, obtain the callback by opening the extension's service-worker DevTools from the extensions page and evaluating:
 
@@ -49,7 +51,7 @@ For an unpacked install, obtain the callback by opening the extension's service-
 chrome.identity.getRedirectURL('discord')
 ```
 
-Register that exact callback for the application's OAuth setup in the Discord Developer Portal with **Public Client** enabled. The callback depends on the lab's actual extension ID. Discord publishing uses an experimental Headless Sessions transport.
+Register that exact callback for the application's OAuth setup in the Discord Developer Portal with **Public Client** enabled. The callback depends on the installed extension's actual ID. Discord publishing uses an experimental Headless Sessions transport.
 
 Activity-authored song, artist, and album links can make Discord text and artwork clickable. During ordinary playback transitions, an empty presence is delayed to avoid flicker. Document exit and tab closure trigger immediate cleanup; a private offscreen document also keeps deferred deletion, when supported, and a document-exit keepalive fallback armed. The popup shows **Browser-close backup** and **Last Discord clear**. Failed deletions retain the session token for retries. The recorded Brave window-close check and its limits are in [TESTING.md](TESTING.md).
 
@@ -77,8 +79,8 @@ node tools/check-version-bumps.mjs --base=origin/main
 
 The version-bump gate accepts `--base=<ref>` and otherwise uses GitHub event/base environment variables or `HEAD^`; choose the intended review base. V1 and V2 package tests and their fixtures are optional local files ignored in their respective repositories. Run `npm test` there when those files are present; CI uses the tracked contract, type, catalog, syntax and version checks. See each repository README for its commands.
 
-`npm run check` validates the extension manifest and JavaScript, local contract outputs, and bundled YouTube files. When the Activities checkout is present, it also checks its generated contract and catalog hashes, compares canonical contract copies, and verifies bundled YouTube parity. Changes to the canonical contract belong in the Activities repository. Run `node tools/generate-api-contract.mjs` there to regenerate its outputs; in this workspace layout it also refreshes the lab's contract, schemas, and runtime constants. For standalone checkouts, synchronize those copies separately.
+`npm run check` validates the extension manifest and JavaScript, local contract outputs, and bundled YouTube files. When the Activities checkout is present, it also checks its generated contract and catalog hashes, compares canonical contract copies, and verifies bundled YouTube parity. Changes to the canonical contract belong in the Activities repository. Run `node tools/generate-api-contract.mjs` there to regenerate its outputs; in this workspace layout it also refreshes the extension's contract, schemas, and runtime constants. For standalone checkouts, synchronize those copies separately.
 
-`npm run build` replaces `dist/` with `ChudPresence-Chromium-Activity-Lab-2.0.4/` and its zip. A system `tar` executable is required for packaging. On Windows, `build.bat` runs the same three extension gates. Load `extension/` directly while debugging. `dist/`, scratch browser profiles, both Activities checkouts, and the local historical snapshot are ignored here. Building performs no publication.
+`npm run build` replaces `dist/` with `ChudPresence-2.0.4/` and its zip. A system `tar` executable is required for packaging. On Windows, `build.bat` runs the same three extension gates. Load `extension/` directly while debugging. `dist/`, scratch browser profiles, both Activities checkouts, and the local historical snapshot are ignored here. Building performs no publication.
 
 See [architecture](ARCHITECTURE.md), [the Activity API V2 guide](extension/ACTIVITY_API_V2.md), [verification results](TESTING.md), [privacy details](PRIVACY.md), and [remaining browser checks](TESTING.md#remaining-browser-checks-before-distribution). The private V1 authoring guide remains in the [V1 Activities repository](ChudPresence-Activities/ACTIVITY_API.md).

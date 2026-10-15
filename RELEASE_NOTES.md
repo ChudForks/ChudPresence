@@ -1,4 +1,4 @@
-# ChudPresence Chromium Activity Lab 2.0.4
+# ChudPresence 2.0.4
 
 Stable promotion: October 15, 2026. Release tag: `v2.0.4`.
 
@@ -8,6 +8,9 @@ The extension version remains 2.0.4 because promotion changes documentation and
 the browser verification harness, with no additional shipped runtime changes.
 
 ## Included behavior
+
+- The extension, popup, Activity Library, Discord fallback labels and release
+  archives use the ChudPresence name.
 
 - Programmable V2 package JavaScript runs in dedicated QuickJS/WASM guests,
   with declared, filtered page snapshots, scoped services and resource limits.

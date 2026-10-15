@@ -45,8 +45,8 @@ function createAuthHarness(expiresIn) {
 
 test('derives the OAuth callback from this Chromium extension identity', () => {
   assert.equal(discordRedirectUrl({
-    getRedirectURL: (path) => `https://lab-extension.chromiumapp.org/${path}`,
-  }), 'https://lab-extension.chromiumapp.org/discord');
+    getRedirectURL: (path) => `https://example-extension.chromiumapp.org/${path}`,
+  }), 'https://example-extension.chromiumapp.org/discord');
   assert.throws(() => discordRedirectUrl({}), /identity API is unavailable/);
 });
 

@@ -6,7 +6,7 @@ const root = path.resolve(import.meta.dirname, '..');
 const source = path.join(root, 'extension');
 const dist = path.join(root, 'dist');
 const manifest = JSON.parse(await fs.readFile(path.join(source, 'manifest.json'), 'utf8'));
-const folderName = `ChudPresence-Chromium-Activity-Lab-${manifest.version}`;
+const folderName = `ChudPresence-${manifest.version}`;
 const staged = path.join(dist, folderName);
 const archive = path.join(dist, `${folderName}.zip`);
 

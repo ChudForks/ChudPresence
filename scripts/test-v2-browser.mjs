@@ -20,7 +20,7 @@ try {
   catch { throw new Error('Install Playwright or set CHUDPRESENCE_TEST_NODE_MODULES to its node_modules directory.'); }
 }
 
-const fixtureOrigin = 'https://www.youtube.com'; // Already granted by the lab manifest.
+const fixtureOrigin = 'https://www.youtube.com'; // Already granted by the extension manifest.
 const fixturePath = '/chudpresence-v2-browser-fixture';
 const id = 'browser-v2-smoke';
 const sentinel = 'v2-browser-fixture-extension-private';

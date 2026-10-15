@@ -266,7 +266,7 @@ function renderDashboard(state) {
     }
   } else {
     kickerEl.textContent = enabled ? 'Nothing playing' : 'Activity sharing paused';
-    titleEl.textContent = enabled ? 'Open a supported streaming site' : 'Activity Lab is turned off';
+    titleEl.textContent = enabled ? 'Open a supported streaming site' : 'ChudPresence is turned off';
     artistEl.textContent = enabled ? 'Your activity preview will appear here.' : 'Enable it in Settings when you are ready.';
     artEl.removeAttribute('src');
     artEl.hidden = true;

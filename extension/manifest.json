@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "ChudPresence Chromium Activity Lab",
+  "name": "ChudPresence",
   "version": "2.0.4",
-  "description": "Chromium Activity Lab with sandboxed programmable Activity API v2 and trusted v1 support.",
+  "description": "Share your browsing and playback activity on Discord with customizable Activities.",
   "minimum_chrome_version": "135",
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'"
@@ -14,7 +14,7 @@
     "128": "icons/icon128.png"
   },
   "action": {
-    "default_title": "ChudPresence Chromium Activity Lab",
+    "default_title": "ChudPresence",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
