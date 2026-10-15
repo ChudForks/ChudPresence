@@ -10,7 +10,7 @@ The previous declarative V2 implementation is retained as a [historical referenc
 | --- | --- |
 | This repository | Chromium runtime, Activity Library, popup, permissions, settings, Discord authorization and publishing, schemas, tests, and local packaging |
 | [`ChudPresence-Activities/`](ChudPresence-Activities/README.md) | Official first-party packages, generated catalog, canonical V1 contract and SDK types, authoring CLI, shared artwork, and package validation |
-| [`ChudPresence-Activities-V2/`](ChudPresence-Activities-V2/README.md) | Independent programmable V2 packages, SDK tooling, generated catalog and tests; Prime Video, Google and Instagram Reels packages |
+| [`ChudPresence-Activities-V2/`](ChudPresence-Activities-V2/README.md) | Independent programmable V2 packages, SDK tooling, generated catalog and tests; Prime Video, Google and Instagram browsing/Stories/Reels packages |
 
 `ChudPresence-Activities/` is a separate Git checkout ignored by this repository, not a submodule or part of the extension build. Its checked-out catalog contains **67Movies, Crunchyroll, Disney+, Hulu, Kick, SoundCloud, Twitch, YouTube, and YouTube Music**. Discover fetches the official `ChudForks/ChudPresence-Activities` catalog from GitHub; editing the local checkout does not change Discover. Use Developer mode to test local packages.
 

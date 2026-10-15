@@ -1,5 +1,91 @@
 # Chromium Activity Lab verification
 
+## Instagram Saved and generic fallback (October 15, 2026)
+
+Instagram **2.3.0** adds a generic `Saved` state for `/<username>/saved/`, with
+any valid username and collection descendants. The user's open Saved URL
+confirmed that shape. Reports omit the owner and collection names/IDs; posts
+opened from Saved keep its label and elapsed timer. All other routes without
+a specific handler show only `On Instagram`, including unknown-source posts.
+The remaining challenge/checkpoint exclusions were removed to allow fallback.
+Hidden/foreign pages and invalid required Reel metadata retain their clear behavior.
+
+The independent V2 repository passed build/check, **56 tests**, current-extension
+integration and all browser fixtures. Regressions cover multiple Saved usernames,
+collection pages, source retention, generic fallback without stale captions or
+handles, timer continuity/reset and hidden-tab cleanup. The real broker,
+QuickJS and Discord builders accept both new states. No additional declared
+reads, network access or extension changes were added. Reimport Instagram
+**2.3.0**'s three package files to apply it; installed preview and Discord
+publication remain unverified after reimport.
+
+## Instagram Stories, Messages and Settings (October 15, 2026)
+
+Instagram **2.2.0** adds `Watching story` with the URL owner's `@username`,
+Story-index/highlight states, generic `Messages` for every `/direct/...` page,
+and only `Settings` for every `/accounts/...` page. Story owner changes reset
+elapsed time, while Story IDs for the same owner retain it. Messages/settings
+retain their timers across thread/subpage changes. Photo stories need no player.
+Reports include no conversation identity/text, account field, settings subpage,
+Story ID or reply content. These states do not become `/p/...` post sources.
+
+The user's open Story URL confirmed the owner/numeric-ID route. No navigation
+or Story-content inspection was needed. Package exclusions now retain only
+challenge/checkpoint paths. Existing declared reads and extension code are
+unchanged; Activity Lab **2.0.2** remains sufficient.
+
+The independent V2 repository passed build/check, **54 tests**, current-extension
+integration and all browser fixtures. New browser cases use a player-free DOM
+with seeded conversation/account/input fields: snapshots contain no reads or
+media, and production presence/Discord builders receive the expected generic
+labels, public Story owner and elapsed-only timestamps. Route boundaries,
+malformed Story paths, timer retention and discarded post context also pass.
+Reimport Instagram **2.2.0**'s three package files to apply the change; installed
+preview and Discord publication remain unverified after reimport.
+
+## Instagram post-viewer source context (October 15, 2026)
+
+Instagram **2.1.1** retains the preceding Home, Search or profile activity while
+the same document opens, pages through or closes `/p/<id>/` posts. This shared
+route does not identify a source by itself. Profile posts retain the source
+`@username` and profile button; Search posts keep `Browsing Search`. Elapsed
+time continues without using post captions, creators or playback metadata.
+Leaving browsing resets context. Hidden tabs clear presence and reset the timer,
+while retaining their known source for return; direct posts without a known
+source clear. A new document has no remembered source.
+
+Live read-only inspection confirmed a Search video at `/p/<id>/` with Search
+still selected behind its modal. The independent package repository passed
+build/check, **51 tests** and browser fixtures through the production collector,
+QuickJS and Discord builder. The same post URL is tested after Home, Search and
+two different profiles, with no source misclassification. Additional checks
+cover retained/reset timers, source replacement and unknown/malformed posts.
+Reimport Instagram **2.1.1**'s three package files to apply this change.
+
+## Instagram Home, Search and profiles (October 15, 2026)
+
+Instagram **2.1.0** adds generic browsing activity for Home (`Browsing Home`),
+Search (`Browsing Search`) and public profile routes (`Viewing profile` with
+`@username`). Profiles include Reels, Tagged and Reposts tabs. Browsing uses
+elapsed time, the static Instagram logo and a public profile button where
+applicable. Existing Reel caption/creator, native playback progress and buttons
+remain supported. No extension update beyond **2.0.2** is needed.
+
+The independent V2 repository passed build/check, **47 tests**, current-extension
+QuickJS integration and browser fixtures for all three packages. New regressions
+cover both Instagram origins, current-profile identity despite stale players,
+timer retention/reset, hidden tabs, unsupported/private routes and same-document
+Home/Search/profile/Reels transitions. Browser reports pass through production
+normalization, presence and Discord builders, including generic activity type,
+omitted empty state, elapsed-only timestamps, artwork and progress preferences.
+Search inputs are not sampled. The catalog includes the new matches and hashes.
+
+Live read-only navigation confirmed the sidebar Search link targets `/explore/`
+and the viewed profile's public handle is in its pathname. The original profile
+page was restored. Reimport Instagram's `metadata.json`, `activity.js` and
+`icon.png` to use **2.1.0**; installed preview and Discord publication still need
+verification after reimport.
+
 ## Instagram first Reel opened from Home (October 15, 2026)
 
 Instagram **2.0.2** fixes a package metadata issue on the first Reel opened from
