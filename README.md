@@ -24,8 +24,8 @@ Playback detection and the local preview work without Discord. Connect Discord f
 
 Activity packages are maintained separately from the extension:
 
-- [Chat Presence Activity (V1)](https://github.com/ChudForks/ChudPresence-Activities) contains the existing official packages and V1 reference. V1 remains for compatibility and inspection; use V2 for new Activity development.
-- [Chat Presence Activity V2](https://github.com/ChudForks/ChudPresence-Activities-V2) is the V2 package repository.
+- [ChudPresence Activity (V1)](https://github.com/ChudForks/ChudPresence-Activities) contains the existing official packages and V1 reference. V1 remains for compatibility and inspection; use V2 for new Activity development.
+- [ChudPresence Activity V2](https://github.com/ChudForks/ChudPresence-Activities-V2) is the V2 package repository.
 - [Activity API V2 development guide](https://github.com/ChudForks/ChudPresence/blob/master/extension/ACTIVITY_API_V2.md) documents the extension's V2 API and package authoring model.
 
 ## Privacy
