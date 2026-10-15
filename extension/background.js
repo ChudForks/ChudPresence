@@ -23,13 +23,17 @@ import { presencePublisher } from './platform/presence-publisher.js';
 import { EXTENSION_NAME } from './core/branding.js';
 
 const activityRegistry = new ActivityRegistry();
+const navigationClears = new Map();
 const ACTIVITY_PRUNE_ALARM = 'activity-prune-stale';
 const activityManager = new ActivityManager({
   onReport({ tabId, documentId, frameId, track }) {
+    cancelNavigationClears(null, tabId, null, frameId);
     activityRegistry.update(tabId, documentId, track, frameId);
     schedulePublish();
   },
-  onClear(activityId, tabId, documentId, frameId, { closing = false } = {}) {
+  onClear(activityId, tabId, documentId, frameId, { closing = false, navigationGraceMs = 0 } = {}) {
+    if (closing && navigationGraceMs > 0 && deferNavigationClear(activityId, tabId, documentId, frameId, navigationGraceMs)) return;
+    cancelNavigationClears(activityId, tabId, documentId, frameId);
     const known = activityRegistry.clearActivity(activityId, tabId, documentId, frameId);
     if (!known) return;
     if (typeof tabId === 'number') clearActiveTab(tabId);
@@ -73,6 +77,40 @@ registerActivityRestoreHandlers({
 
 async function loadSettings() {
   settings = normalizeSettings(await chrome.storage.local.get(null));
+  if (!settings.enabled) discardNavigationClears();
+}
+
+function cancelNavigationClears(activityId = null, tabId = null, documentId = null, frameId = null) {
+  for (const [key, pending] of navigationClears) {
+    if (activityId !== null && pending.activityId !== activityId ||
+        typeof tabId === 'number' && pending.tabId !== tabId ||
+        documentId !== null && documentId !== undefined && pending.documentId !== documentId ||
+        Number.isInteger(frameId) && pending.frameId !== frameId) continue;
+    clearTimeout(pending.timer);
+    navigationClears.delete(key);
+  }
+}
+
+function discardNavigationClears() {
+  for (const pending of navigationClears.values()) {
+    activityRegistry.clearActivity(pending.activityId, pending.tabId, pending.documentId, pending.frameId);
+  }
+  cancelNavigationClears();
+}
+
+function deferNavigationClear(activityId, tabId, documentId, frameId, graceMs) {
+  if (!activityRegistry.hasActivity(activityId, tabId, documentId, frameId)) return false;
+  const key = JSON.stringify([activityId, tabId, documentId, frameId]);
+  if (navigationClears.has(key)) return true; // Repeated signals cannot extend the deadline.
+  const pending = { activityId, tabId, documentId, frameId };
+  pending.timer = setTimeout(() => {
+    navigationClears.delete(key);
+    // clearDocument checks ownership, so an expired old document cannot erase
+    // a newer report. The grace has already elapsed; do not add another delay.
+    onDocumentGone(tabId, documentId, { closing: true, frameId });
+  }, Math.min(5000, graceMs));
+  navigationClears.set(key, pending);
+  return true;
 }
 
 function currentTrack() {
@@ -168,9 +206,10 @@ function pingRemaining() {
   }
 }
 
-function onTabGone(tabId, { closing = false, retireDocuments = true } = {}) {
+function onTabGone(tabId, { closing = false, retireDocuments = true, removed = false } = {}) {
   if (typeof tabId !== 'number') return;
-  activityManager.invalidateTab(tabId, { retireDocuments }).catch(() => {});
+  cancelNavigationClears(null, tabId);
+  activityManager.invalidateTab(tabId, { retireDocuments, removed }).catch(() => {});
   const known = activityRegistry.clearTab(tabId);
   clearActiveTab(tabId);
   if (!known) return;
@@ -378,6 +417,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message?.type === 'SET_ENABLED') {
     settings.enabled = Boolean(message.enabled);
+    if (!settings.enabled) discardNavigationClears();
     chrome.storage.local.set({ enabled: settings.enabled });
     publishCurrentActivity()
       .then(() => sendResponse({ ok: true, settings }))
@@ -403,11 +443,11 @@ chrome.runtime.onConnect.addListener((port) => {
         if (!tab || tab.discarded) onTabGone(tabId, { closing: true });
         else onDocumentGone(tabId, documentId, { frameId });
       })
-      .catch(() => onTabGone(tabId, { closing: true }));
+      .catch(() => onTabGone(tabId, { closing: true, removed: true }));
   });
 });
 
-chrome.tabs.onRemoved.addListener((tabId) => onTabGone(tabId, { closing: true }));
+chrome.tabs.onRemoved.addListener((tabId) => onTabGone(tabId, { closing: true, removed: true }));
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   // A loading update can accompany a player or route change in the same

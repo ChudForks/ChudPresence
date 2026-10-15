@@ -16,8 +16,8 @@ export function runActivityV2(config) {
         .test(`${url.pathname}${url.search}`);
     } catch { return false; }
   };
-  const allowed = () => config.matches.some((pattern) => matches(pattern, location.href)) &&
-    !config.excludeMatches.some((pattern) => matches(pattern, location.href));
+  const allowed = (url = location.href) => config.matches.some((pattern) => matches(pattern, url)) &&
+    !config.excludeMatches.some((pattern) => matches(pattern, url));
   if (!allowed() || (config.frames !== 'all' && window !== window.top)) return;
   if (globalThis.__chudpresenceActivityGeneration === config.capability) return;
   globalThis.__chudpresenceV2Stop?.();
@@ -28,6 +28,20 @@ export function runActivityV2(config) {
   let reconnectTimer = null;
   let reconnectAttempts = 0;
   let sequence = 0;
+  let navigation = null;
+  const onNavigate = (event) => {
+    const url = event.destination?.url;
+    navigation = config.navigationGraceMs > 0 && !event.defaultPrevented &&
+      event.destination?.sameDocument === false && typeof url === 'string' && url.length <= 8192 && allowed(url)
+      ? { url, signal: event.signal } : null;
+  };
+  const onNavigationError = () => { navigation = null; };
+  const onPageShow = (event) => {
+    window.removeEventListener('pageshow', onPageShow);
+    if (!event.persisted || globalThis.__chudpresenceActivityGeneration !== config.capability) return;
+    delete globalThis.__chudpresenceActivityGeneration;
+    runActivityV2(config);
+  };
   const send = async (operation, payload = {}) => {
     const response = await chrome.runtime.sendMessage({
       type: 'CHUDPRESENCE_ACTIVITY_REQUEST',
@@ -46,22 +60,31 @@ export function runActivityV2(config) {
     }
     return response.data;
   };
-  const stop = () => {
+  const stop = (documentEnded = false) => {
     if (ended) return;
     ended = true;
     clearInterval(timer);
     clearTimeout(reconnectTimer);
+    document.removeEventListener('visibilitychange', onVisibilityChange);
+    window.navigation?.removeEventListener('navigate', onNavigate);
+    window.navigation?.removeEventListener('navigateerror', onNavigationError);
     window.removeEventListener('pagehide', onPageHide);
     window.removeEventListener('beforeunload', onPageHide);
     try { port?.disconnect(); } catch { /* Extension was reloaded. */ }
     if (globalThis.__chudpresenceActivityGeneration === config.capability) {
-      delete globalThis.__chudpresenceActivityGeneration;
+      // A tabs.onUpdated injection can race a navigation's beforeunload while
+      // the old document is still present. Do not restart that ended document.
+      // Explicit reload already removes this marker before reinjection.
+      if (!documentEnded) delete globalThis.__chudpresenceActivityGeneration;
+      else window.addEventListener('pageshow', onPageShow, { once: true });
       delete globalThis.__chudpresenceV2Stop;
     }
   };
   const onPageHide = () => {
-    if (!ended) void send('presence.clear', { closing: true }).catch(() => {});
-    stop();
+    if (!ended) void send('presence.clear', { closing: true,
+      ...(navigation && !navigation.signal?.aborted ? { navigationUrl: navigation.url } : {}),
+    }).catch(() => {});
+    stop(true);
   };
   const fail = (error) => {
     if (ended) return;
@@ -107,8 +130,18 @@ export function runActivityV2(config) {
   globalThis.__chudpresenceV2Stop = stop;
   window.addEventListener('pagehide', onPageHide, { once: true });
   window.addEventListener('beforeunload', onPageHide, { once: true });
+  window.navigation?.addEventListener('navigate', onNavigate);
+  window.navigation?.addEventListener('navigateerror', onNavigationError);
   connect();
   let inFlight = false;
+  let pendingVisibility = false;
+  function onVisibilityChange() {
+    // A known document navigation will retire the worker via onPageHide. Do not
+    // let an intermediate hidden snapshot clear its presence before that handoff.
+    if (navigation && !navigation.signal?.aborted) return;
+    if (inFlight) pendingVisibility = true;
+    else void tick();
+  }
   const tick = async () => {
     if (ended || inFlight) return;
     if (!allowed()) { void send('presence.clear', { closing: true }).catch(() => {}); stop(); return; }
@@ -119,8 +152,13 @@ export function runActivityV2(config) {
       await request('sandbox.update', { snapshot: broker.collectActivityV2Snapshot(config.pageAccess, document) });
       reconnectAttempts = 0;
     } catch (error) { if (error?.code !== 'rate_limited') fail(error); }
-    finally { inFlight = false; }
+    finally {
+      inFlight = false;
+      if (pendingVisibility && !ended) { pendingVisibility = false; void tick(); }
+    }
   };
+  if (ended) return;
+  document.addEventListener('visibilitychange', onVisibilityChange);
   void tick();
   if (!ended) timer = setInterval(() => { void tick(); }, 2000);
 }
@@ -131,6 +169,7 @@ export function activityV2ScriptDefinition(record) {
     id: metadata.id, version: metadata.version, capability: record.capability,
     matches: metadata.matches, excludeMatches: metadata.excludeMatches || [],
     frames: metadata.frames || 'top', pageAccess: metadata.pageAccess,
+    navigationGraceMs: metadata.presence?.navigationGraceMs || 0,
   };
   return {
     id: `chudpresence-activity-${metadata.id}`,

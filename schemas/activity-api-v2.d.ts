@@ -12,7 +12,7 @@ export interface ActivityV2Metadata {
   executionWorld?: 'USER_SCRIPT'; aliases?: string[]; tags?: string[];
   author?: { name: string; url?: string }; contributors?: { name: string; url?: string }[];
   defaultMediaKind?: ActivityReport['kind']; repository?: string; homepage?: string; serviceUrl?: string;
-  presence?: { kind?: 'music' | 'video' | 'streaming' | 'generic' };
+  presence?: { kind?: 'music' | 'video' | 'streaming' | 'generic'; navigationGraceMs?: number };
   settingsUi?: { statusLabels?: { app?: string; artist?: string; track?: string } };
   settings?: (
     { id: string; type: 'boolean'; label: string; default: boolean } |
@@ -27,7 +27,7 @@ export interface MediaSnapshot {
   rect: { x: number; y: number; width: number; height: number };
 }
 export interface Snapshot {
-  readonly page: { readonly origin?: string; readonly pathname?: string; readonly query?: Readonly<Record<string, string | null>> };
+  readonly page: { readonly origin?: string; readonly pathname?: string; readonly visibilityState?: 'visible' | 'hidden' | 'prerender'; readonly query?: Readonly<Record<string, string | null>>; readonly queryDuplicates?: readonly string[] };
   readonly reads: Readonly<Record<string, Json>>;
   readonly media: readonly MediaSnapshot[];
 }
@@ -35,8 +35,8 @@ export interface ActivityReport {
   kind: 'video' | 'movie' | 'episode' | 'song' | 'stream' | 'game' | 'generic';
   media: { title: string; subtitle?: string; artist?: string; album?: string; series?: string;
     season?: number; episode?: number; creator?: string; channel?: string; category?: string; game?: string; playlist?: string };
-  playback?: { state?: 'playing' | 'paused' | 'stopped'; position?: number; duration?: number; rate?: number; live?: boolean };
-  display?: { details?: string; state?: string; detailsUrl?: string; stateUrl?: string; statusDisplay?: 'name' | 'details' | 'state' };
+  playback?: { state?: 'playing' | 'paused' | 'stopped'; position?: number; duration?: number; rate?: number; live?: boolean; elapsed?: boolean };
+  display?: { name?: string; details?: string; state?: string; detailsUrl?: string; stateUrl?: string; statusDisplay?: 'name' | 'details' | 'state' };
   artwork?: { large?: string; largeUrl?: string; small?: string; largeText?: string; smallText?: string };
   buttons?: { label: string; url: string }[];
   visibility?: 'normal' | 'idle' | 'private' | 'ad';

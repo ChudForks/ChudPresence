@@ -4,6 +4,30 @@ import { createPresenceIntent } from '../extension/core/presence.js';
 import { normalizeActivityReport } from '../extension/core/activity-validator.js';
 import { buildHeadlessActivity } from '../extension/discord/activity-builder.js';
 
+test('generic v2 pages preserve mode names, empty state and elapsed time through Discord formatting', () => {
+  const report = normalizeActivityReport({
+    kind: 'generic', media: { title: 'test' },
+    display: { name: 'Google Images', details: 'Searching for : test', state: '', statusDisplay: 'name' },
+    playback: { state: 'playing', elapsed: true, position: 11 },
+    artwork: { large: 'https://www.google.com/images/branding/googleg/2x/googleg_standard_color_128dp.png', largeText: 'Google' },
+  }, 2);
+  const intent = createPresenceIntent({ ...report, activityName: 'Google', activityId: 'google' }, 100_000);
+  assert.equal(intent.name, 'Google Images');
+  assert.equal(intent.details, 'Searching for : test');
+  assert.equal(intent.type, 'playing');
+  assert.equal(intent.state, '');
+  assert.equal(intent.statusDisplayType, 'name');
+  assert.deepEqual(intent.timestamps, { start: 89 });
+  const activity = buildHeadlessActivity(intent, '1549066134706323548');
+  assert.equal(activity.name, 'Google Images');
+  assert.equal(activity.type, 0);
+  assert.equal(Object.hasOwn(activity, 'state'), false);
+  assert.deepEqual(activity.timestamps, { start: 89000 });
+  const hidden = createPresenceIntent(report, 100_000, { showArtwork: false, showTimestamps: false });
+  assert.equal(hidden.assets, null);
+  assert.equal(hidden.timestamps, null);
+});
+
 test('explicitly empty artwork text omits the music card album line through the V1 pipeline', () => {
   for (const album of [undefined, 'Stale album metadata']) {
     const report = normalizeActivityReport({

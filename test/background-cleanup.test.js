@@ -91,6 +91,67 @@ test('document-exit clear publishes immediately before tab removal can forget th
   assert.equal(harness.publications.length, 1);
 });
 
+test('same-Activity navigation holds the report and replaces it without publishing an empty presence', async () => {
+  const harness = await createBackgroundHarness();
+  harness.report();
+  harness.runTimer(250);
+  harness.callbacks.onClear('music', 9, 'source-document', 0, { closing: true, navigationGraceMs: 4000 });
+  assert.equal(harness.publications.length, 1);
+  assert.equal([...harness.timers.values()].filter(timer => timer.delay === 4000).length, 1);
+  harness.report('replacement-document');
+  harness.runTimer(250);
+  assert.equal(harness.publications.length, 2);
+  assert.ok(harness.publications.every(item => item.intent?.details === 'A song'));
+  assert.equal([...harness.timers.values()].some(timer => timer.delay === 4000), false);
+});
+
+test('closing the tab during navigation grace clears immediately and cancels the deadline', async () => {
+  const harness = await createBackgroundHarness();
+  harness.report();
+  harness.callbacks.onClear('music', 9, 'source-document', 0, { closing: true, navigationGraceMs: 4000 });
+  harness.removeTab(9);
+  assert.equal(harness.publications.length, 1);
+  assert.equal(harness.publications[0].intent, null);
+  assert.equal(harness.publications[0].options.closing, true);
+  assert.equal([...harness.timers.values()].some(timer => timer.delay === 4000), false);
+});
+
+test('navigation grace expires once without adding the ordinary clear delay', async () => {
+  const harness = await createBackgroundHarness();
+  harness.report();
+  harness.callbacks.onClear('music', 9, 'source-document', 0, { closing: true, navigationGraceMs: 4000 });
+  harness.callbacks.onClear('music', 9, 'source-document', 0, { closing: true, navigationGraceMs: 4000 });
+  assert.equal([...harness.timers.values()].filter(timer => timer.delay === 4000).length, 1);
+  harness.runTimer(4000);
+  assert.equal(harness.publications.length, 1);
+  assert.equal(harness.publications[0].intent, null);
+  assert.equal(harness.publications[0].options.closing, true);
+  assert.equal([...harness.timers.values()].some(timer => timer.delay === 1500), false);
+});
+
+test('a stale navigation deadline or late exit cannot erase the replacement document', async () => {
+  const harness = await createBackgroundHarness();
+  harness.report();
+  harness.callbacks.onClear('music', 9, 'source-document', 0, { closing: true, navigationGraceMs: 4000 });
+  const deadline = [...harness.timers.values()].find(timer => timer.delay === 4000).callback;
+  harness.report('replacement-document');
+  deadline();
+  harness.callbacks.onClear('music', 9, 'source-document', 0, { closing: true, navigationGraceMs: 4000 });
+  harness.runTimer(250);
+  assert.equal(harness.publications.length, 1);
+  assert.equal(harness.publications[0].intent.details, 'A song');
+});
+
+test('a direct closing clear overrides navigation grace immediately', async () => {
+  const harness = await createBackgroundHarness();
+  harness.report();
+  harness.callbacks.onClear('music', 9, 'source-document', 0, { closing: true, navigationGraceMs: 4000 });
+  harness.callbacks.onClear('music', 9, 'source-document', 0, { closing: true });
+  assert.equal(harness.publications.length, 1);
+  assert.equal(harness.publications[0].intent, null);
+  assert.equal([...harness.timers.values()].some(timer => timer.delay === 4000), false);
+});
+
 test('ordinary Activity clear retains the delay for transient playback changes', async () => {
   const harness = await createBackgroundHarness();
   harness.report();

@@ -148,15 +148,21 @@ async function until(operation, predicate, message, timeout = 15_000) {
 }
 
 const { context, profile, executablePath } = await launch();
+let navigationGate = null;
+let closingNavigationTest = false;
 try {
   const unexpectedRequests = [];
   await context.route(/^https?:\/\//, async route => {
     const url = new URL(route.request().url());
     if (url.origin === fixtureOrigin && url.pathname === fixturePath) {
+      if (url.searchParams.get('hold') === '1' && navigationGate) {
+        navigationGate.entered = true;
+        await navigationGate.ready;
+      }
       await route.fulfill({
         status: 200, contentType: 'text/html', body: fixture,
         headers: { 'Content-Security-Policy': "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; media-src 'none'; object-src 'none'" },
-      });
+      }).catch(error => { if (!closingNavigationTest) throw error; });
     } else {
       unexpectedRequests.push(url.origin + url.pathname);
       await route.abort();
@@ -223,7 +229,7 @@ try {
   assert.equal(probe.control, null);
   assert.equal(probe.link, 'https://example.com/watch');
   assert.deepEqual(probe.catalog, { title: 'Public JSON title', nested: { episode: 4 } });
-  assert.deepEqual(probe.info, { origin: fixtureOrigin, pathname: fixturePath });
+  assert.deepEqual(probe.info, { visibilityState: 'visible', origin: fixtureOrigin, pathname: fixturePath });
   assert.equal(probe.media.length, 1);
   assert.equal(typeof probe.media[0].currentTime, 'number');
   assert.equal(probe.frozen, true);
@@ -291,12 +297,83 @@ try {
   const disable = await send({ type: 'ACTIVITY_SET_ENABLED', id, enabled: false });
   assert.equal(disable.ok, true, disable.error || 'Activity disable failed');
   await until(sandboxWorkers, items => items.length === 0, 'Disabled activities retained sandbox workers');
+
+  const navigationId = 'browser-v2-navigation';
+  const navigationPackage = activityPackage(navigationId, `ChudPresence.onUpdate(async () => {
+    const title = ChudPresence.page.info().query.q;
+    if (!title) { await ChudPresence.clear(); return; }
+    await ChudPresence.report({kind:'generic',media:{title},display:{details:title},playback:{elapsed:true}});
+  });`, { url: true, queryParameters: ['q'] });
+  navigationPackage.metadata.presence = { navigationGraceMs: 4000 };
+  await install(navigationPackage);
+  assert.equal((await send({ type: 'SET_ENABLED', enabled: true })).ok, true);
+  await page.goto(`${fixtureOrigin}${fixturePath}?q=first`);
+  const state = () => send({ type: 'ACTIVITY_LIBRARY_STATE' });
+  await until(state, response => response?.result?.finalPresenceIntent?.details === 'first',
+    'Navigation fixture did not publish the first query');
+  async function holdNavigation(query, submit = false) {
+    let release;
+    navigationGate = { entered: false, ready: new Promise(resolve => { release = resolve; }) };
+    navigationGate.release = release;
+    const destination = `${fixtureOrigin}${fixturePath}?q=${query}&hold=1`;
+    await page.evaluate(({ url, submit }) => {
+      if (submit) {
+        const form = document.createElement('form');
+        const destination = new URL(url);
+        form.action = destination.origin + destination.pathname;
+        for (const [name, value] of destination.searchParams) {
+          const input = document.createElement('input');
+          input.type = 'hidden'; input.name = name; input.value = value;
+          form.append(input);
+        }
+        const button = document.createElement('button');
+        button.id = 'navigation-test-link'; button.textContent = 'Submit search';
+        form.append(button);
+        document.body.append(form);
+      } else {
+        const link = document.createElement('a');
+        link.id = 'navigation-test-link'; link.href = url; link.textContent = 'Next search mode';
+        document.body.append(link);
+      }
+    }, { url: destination, submit });
+    const navigating = page.waitForURL(destination)
+      .then(() => ({ ok: true }), error => ({ error }));
+    await page.locator('#navigation-test-link').click({ noWaitAfter: true });
+    await until(async () => navigationGate.entered, Boolean, 'The fixture navigation was not requested', 2000);
+    const held = await until(state, response => response?.result?.installed?.find(item => item.id === navigationId)?.activeFrames.length === 0,
+      'The outgoing document was not retired', 2000);
+    return { held, navigating, release };
+  }
+  let transition = await holdNavigation('second');
+  assert.equal(transition.held.result.finalPresenceIntent?.details, 'first', `Document navigation cleared the held presence: ${JSON.stringify(transition.held.result.installed.find(item => item.id === navigationId))}`);
+  transition.release();
+  assert.equal((await transition.navigating).ok, true);
+  await until(state, response => response?.result?.finalPresenceIntent?.details === 'second',
+    'The replacement query did not replace held presence');
+  transition = await holdNavigation('third', true);
+  assert.equal(transition.held.result.finalPresenceIntent?.details, 'second');
+  closingNavigationTest = true;
+  const closeStarted = Date.now();
+  await page.close();
+  transition.release();
+  await transition.navigating;
+  await until(state, response => response?.result?.finalPresenceIntent === null,
+    'Closing a tab during navigation grace did not clear immediately', 1500);
+  assert.ok(Date.now() - closeStarted < 2000, 'Tab close waited for the navigation grace');
+  try {
+    await until(sandboxWorkers, items => items.length === 0, 'Closed navigation fixture retained workers', 3000);
+  } catch (error) {
+    const diagnostic = await state();
+    const tabs = await worker.evaluate(() => chrome.tabs.query({ url: 'https://www.youtube.com/*' }));
+    throw new Error(`${error.message}; ${JSON.stringify({ activity: diagnostic.result.installed.find(item => item.id === navigationId), tabs })}`);
+  }
   await targets.detach();
   assert.ok(!unexpectedRequests.some(url => url.includes('attacker.invalid')), 'The network broker reached the undeclared destination');
   assert.deepEqual(browserErrors, []);
   console.log(`V2 browser security smoke passed (${path.basename(executablePath)}, ${await context.browser().version()}).`);
-  console.log('Verified real USER_SCRIPT broker injection on a strict-CSP page, isolated offscreen workers, public DOM/shadow/JSON/media reads, credential isolation, scoped storage, denied network and selectors, presence reporting, CPU interruption, failure tombstones, explicit reload, and disable cleanup.');
+  console.log('Verified real USER_SCRIPT broker injection on a strict-CSP page, isolated offscreen workers, public DOM/shadow/JSON/media reads, credential isolation, scoped storage, denied network and selectors, presence reporting, CPU interruption, failure tombstones, explicit reload, disable cleanup, navigation grace, and immediate tab-close clearing during grace.');
 } finally {
+  navigationGate?.release?.();
   await context.close();
   await removeProfile(profile);
 }

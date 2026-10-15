@@ -18,7 +18,7 @@ export function buildHeadlessActivity(intent, applicationId) {
     name: intent.name || EXTENSION_NAME,
     type: ACTIVITY_TYPES[intent.type] ?? ACTIVITY_TYPES.playing,
     details: intent.details,
-    state: intent.state || intent.name || EXTENSION_NAME,
+    ...(intent.state !== '' ? { state: intent.state || intent.name || EXTENSION_NAME } : {}),
     status_display_type: STATUS_DISPLAY_TYPES[intent.statusDisplayType] ?? STATUS_DISPLAY_TYPES.name,
   };
 

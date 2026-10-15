@@ -104,6 +104,91 @@ test('v2 reuses scoped settings/storage and accepts the v1-shaped report', async
   assert.deepEqual((await manager.listInstalled())[0].pageAccess, record().metadata.pageAccess);
 });
 
+test('tab removal rejects queued V2 updates/reports so they cannot recreate a worker or presence', async () => {
+  const { manager } = fixture();
+  let updates = 0;
+  manager.v2Host = { stopTab() {}, async update() { updates++; return { accepted: true }; } };
+  await manager.invalidateTab(sender.tab.id, { removed: true });
+  assert.equal(await manager.handleUserScriptMessage(message('sandbox.update', { snapshot: { page: {}, reads: {}, media: [] } }), sender), false);
+  assert.equal(await manager.handleUserScriptMessage(message('presence.report', { report: { kind: 'generic', media: { title: 'stale' } } }), sender), false);
+  assert.equal(updates, 0);
+  assert.equal(manager.lastSeen.size, 0);
+});
+
+test('only opted-in, in-scope top-document navigation receives the metadata grace', async () => {
+  for (const [options, expected] of [
+    [{}, 4000], [{ destination: 'https://other.example/' }, 0],
+    [{ destination: 'https://example.com/private', exclude: true }, 0],
+    [{ destination: 'javascript:alert(1)' }, 0], [{ frameId: 3 }, 0], [{ optIn: false }, 0],
+  ]) {
+    const { manager, calls, records } = fixture();
+    records[metadata.id].metadata.presence = options.optIn === false ? {} : { navigationGraceMs: 4000 };
+    if (options.exclude) records[metadata.id].metadata.excludeMatches = ['https://example.com/private*'];
+    const context = { ...sender, frameId: options.frameId || 0 };
+    await manager.handleUserScriptMessage(message('presence.report', { report: { kind: 'generic', media: { title: 'query' } } }), context);
+    const result = await manager.handleUserScriptMessage(message('presence.clear', {
+      closing: true, navigationUrl: options.destination || 'https://example.com/search?q=new', navigationGraceMs: 999999,
+    }), context);
+    assert.equal(result.ok, true);
+    assert.equal(calls.find(([kind]) => kind === 'clear')[1][4].navigationGraceMs || 0, expected);
+  }
+});
+
+test('v2 navigation opt-in preserves only valid document navigation hints; ordinary closure stays immediate', async () => {
+  for (const [destination, ending, expected] of [
+    [{ url: 'https://example.com/search?q=new', sameDocument: false }, null, true],
+    [{ url: 'https://other.example/', sameDocument: false }, null, false],
+    [{ url: 'https://example.com/search', sameDocument: true }, null, false],
+    [{ url: 'https://example.com/search', sameDocument: false }, 'error', false],
+    [{ url: 'https://example.com/search', sameDocument: false }, 'abort', false],
+    [null, null, false],
+  ]) {
+    const events = new Map();
+    const navigationEvents = new Map();
+    const requests = [];
+    let stopped = false;
+    const context = {
+      URL, location: { href: 'https://example.com/watch' },
+      document: { addEventListener() {}, removeEventListener() {} },
+      navigation: {
+        addEventListener(name, callback) { navigationEvents.set(name, callback); },
+        removeEventListener(name) { navigationEvents.delete(name); },
+      },
+      addEventListener(name, callback) { events.set(name, callback); },
+      removeEventListener(name) { events.delete(name); },
+      setInterval() { return 1; }, clearInterval() { stopped = true; }, setTimeout() {}, clearTimeout() {},
+      chrome: { runtime: {
+        async sendMessage(request) { requests.push(request); return { ok: true, data: {} }; },
+        connect() { return { onMessage: { addListener() {} }, onDisconnect: { addListener() {} }, disconnect() {} }; },
+      } },
+      ChudPresenceV2Page: { collectActivityV2Snapshot() { return { page: {} }; } },
+    };
+    context.window = context;
+    context.top = context;
+    const packageRecord = record();
+    packageRecord.metadata.presence = { navigationGraceMs: 4000 };
+    vm.runInNewContext(activityV2ScriptDefinition(packageRecord).js[1].code, context);
+    await new Promise(resolve => setImmediate(resolve));
+    const signal = { aborted: false };
+    if (destination) navigationEvents.get('navigate')({ destination, signal });
+    if (ending === 'error') navigationEvents.get('navigateerror')();
+    if (ending === 'abort') signal.aborted = true;
+    events.get('beforeunload')();
+    assert.equal(requests.at(-1).payload.closing, true);
+    assert.equal(Boolean(requests.at(-1).payload.navigationUrl), expected);
+    assert.equal(stopped, true);
+    assert.equal(navigationEvents.size, 0);
+    const count = requests.length;
+    vm.runInNewContext(activityV2ScriptDefinition(packageRecord).js[1].code, context);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(requests.length, count, 'A loading-tab injection must not restart the ended document');
+    events.get('pageshow')({ persisted: true });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(requests.length, count + 1, 'Back/forward cache restoration must restart the broker');
+    assert.equal(requests.at(-1).operation, 'sandbox.update');
+  }
+});
+
 for (const excluded of [false, true]) {
   test(`v2 can clear existing presence after an SPA ${excluded ? 'enters an excluded route' : 'leaves its matched path'}`, async () => {
     const { manager, calls, records } = fixture();
@@ -128,7 +213,7 @@ test('bootstrap never runs package text natively and tears down on URL scope los
   const requests = [];
   const context = {
     URL, console, location: { href: 'https://example.com/watch' },
-    document: {}, clearInterval() {}, clearTimeout() {},
+    document: { addEventListener() {}, removeEventListener() {} }, clearInterval() {}, clearTimeout() {},
     setInterval(callback) { tick = callback; return 1; }, setTimeout() {},
     addEventListener() {}, removeEventListener() {},
     chrome: { runtime: {
@@ -153,4 +238,45 @@ test('bootstrap never runs package text natively and tears down on URL scope los
   assert.equal(requests.at(-1).payload.closing, true);
   assert.equal(context.__chudpresenceV2Stop, undefined);
   assert.equal(typeof runActivityV2, 'function');
+});
+
+test('visibility changes queue an immediate snapshot after an in-flight update and remove the listener on stop', async () => {
+  const events = new Map();
+  const requests = [];
+  let finishFirst;
+  const first = new Promise(resolve => { finishFirst = resolve; });
+  const context = {
+    URL, location: { href: 'https://example.com/watch' },
+    document: { visibilityState: 'visible',
+      addEventListener(name, callback) { events.set(name, callback); },
+      removeEventListener(name) { events.delete(name); },
+    },
+    clearInterval() {}, clearTimeout() {}, setInterval() { return 1; }, setTimeout() {},
+    addEventListener() {}, removeEventListener() {},
+    chrome: { runtime: {
+      async sendMessage(request) {
+        requests.push(request);
+        if (requests.length === 1) await first;
+        return { ok: true, data: {} };
+      },
+      connect() { return { onMessage: { addListener() {} }, onDisconnect: { addListener() {} }, disconnect() {} }; },
+    } },
+    ChudPresenceV2Page: { collectActivityV2Snapshot(access, document) { return { page: { visibilityState: document.visibilityState } }; } },
+  };
+  context.window = context;
+  context.top = context;
+  vm.runInNewContext(activityV2ScriptDefinition(record()).js[1].code, context);
+  assert.equal(requests.length, 1);
+  context.document.visibilityState = 'hidden';
+  events.get('visibilitychange')();
+  finishFirst();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(requests.length, 2);
+  assert.equal(requests.at(-1).payload.snapshot.page.visibilityState, 'hidden');
+  context.document.visibilityState = 'visible';
+  events.get('visibilitychange')();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(requests.at(-1).payload.snapshot.page.visibilityState, 'visible');
+  context.__chudpresenceV2Stop();
+  assert.equal(events.has('visibilitychange'), false);
 });

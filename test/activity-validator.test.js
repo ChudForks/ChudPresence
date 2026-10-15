@@ -104,6 +104,17 @@ test('accepts optional status labels and rejects unsupported or empty UI metadat
   }
 });
 
+test('navigation grace is a bounded v2 metadata option and v1 retains its original presence declaration', () => {
+  for (const navigationGraceMs of [0, 1500, 4000, 5000]) {
+    const value = validateActivityMetadata(metadata({ apiVersion: 2, presence: { kind: 'generic', navigationGraceMs } }));
+    assert.equal(value.presence.navigationGraceMs, navigationGraceMs);
+  }
+  for (const navigationGraceMs of [-1, 5001, 1.5, '4000', null]) {
+    assert.throws(() => validateActivityMetadata(metadata({ apiVersion: 2, presence: { navigationGraceMs } })), /navigationGraceMs/);
+  }
+  assert.throws(() => validateActivityMetadata(metadata({ apiVersion: 1, presence: { navigationGraceMs: 4000 } })), /presence/);
+});
+
 test('enforces Activity source size and non-empty content', () => {
   assert.equal(validateActivitySource('globalThis.started = true;'), 'globalThis.started = true;');
   assert.throws(() => validateActivitySource('  '), /non-empty JavaScript/);
@@ -191,4 +202,25 @@ test('enforces nested field limits, playback values, and the two-button maximum'
       { label: '3', url: 'https://example.com/3' },
     ],
   }), /at most two/);
+});
+
+test('v2 supports bounded mode names and elapsed generic pages while v1 rejects those fields', () => {
+  const report = {
+    kind: 'generic', media: { title: 'query' },
+    display: { name: 'Google Images', details: 'Searching for : query', state: '', statusDisplay: 'name' },
+    playback: { state: 'playing', elapsed: true, position: 12 },
+  };
+  const normalized = normalizeActivityReport(report, 2);
+  assert.equal(normalized.display.name, 'Google Images');
+  assert.equal(normalized.display.state, '');
+  assert.equal(normalized.playback.elapsed, true);
+  assert.throws(() => normalizeActivityReport(report, 1), /unsupported field/);
+  for (const name of ['', ' ', 42, null, 'x'.repeat(257)]) {
+    assert.throws(() => normalizeActivityReport({ ...report, display: { name } }, 2), /display.name/);
+  }
+  for (const playback of [{ elapsed: 'true' }, { elapsed: true, live: true }, { elapsed: true, duration: 12 }]) {
+    assert.throws(() => normalizeActivityReport({ ...report, playback }, 2), /elapsed|Elapsed/);
+  }
+  assert.throws(() => normalizeActivityReport({ ...report, kind: 'video' }, 2), /Elapsed/);
+  assert.throws(() => normalizeActivityReport({ kind: 'generic', media: { title: 'query' }, display: { name: 'Google' } }, 1), /unsupported field/);
 });

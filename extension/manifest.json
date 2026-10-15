@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ChudPresence Chromium Activity Lab",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Chromium Activity Lab with sandboxed programmable Activity API v2 and trusted v1 support.",
   "minimum_chrome_version": "135",
   "content_security_policy": {

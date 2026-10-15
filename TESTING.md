@@ -1,5 +1,61 @@
 # Chromium Activity Lab verification
 
+## Google navigation smoothing (October 15, 2026)
+
+Extension **2.0.1** adds the V2 metadata preference
+`presence.navigationGraceMs` (0–5000 ms, default 0). Google **2.0.1** opts into
+4000 ms. A trusted Navigation API hint must identify an in-scope, non-excluded,
+top-document navigation; the background retains its document-owned report until
+the replacement reports or the fixed deadline expires. It does not keep the
+outgoing guest running. A missing navigation hint retains immediate exit cleanup.
+Google separately tolerates a temporarily replaced header for up to four seconds
+on an established supported page, reporting the new query/mode without old stats.
+
+`npm run check`, all **308 extension tests**, and `npm run build` passed. The V2
+repository passed its checks, **38 tests**, version gate, QuickJS integration,
+and browser fixtures; the generated catalog and pinned SDK are synchronized.
+
+Tab removal cancels any pending grace and clears immediately. Closed tab IDs
+reject queued Activity messages so late updates cannot resurrect workers or
+presence. An ended bootstrap cannot restart from a loading-tab injection;
+explicit reload and persisted back/forward restoration still restart correctly.
+Global disable, Activity teardown and direct closing/failure clears bypass the
+pending navigation deadline. Stale documents/deadlines cannot remove new reports.
+
+The real unpacked-extension smoke passed on Edge 155.0.4283.45 with synthetic
+HTTPS responses: a mode link and a submitted search held the old presence while
+the new document response was blocked; a replacement report updated directly;
+closing the tab during the pending submitted search cleared before the four-second
+deadline and left no guest workers. Existing sandbox/security and browser-close
+backup tests remain in the test suite. The checks use no existing browser profile,
+live Google account, or Discord publication. Google live rendering still needs
+an installed-session check after reloading extension and package files.
+
+## Google programmable V2 activity (October 14, 2026)
+
+Added `ChudPresence-Activities-V2/activities/google/` using the archived Google
+presence layout: Homepage, Search/Web, Images and AI Mode, submitted queries,
+visible-only result statistics, Google artwork and elapsed time. Package reads
+are limited to declared `q`/`udm`/`tbm`, `#gbwa`, and `#main #result-stats`.
+
+The generic V2 report contract now adds bounded `display.name` mode labels and
+`playback.elapsed` for generic pages without a live marker or duration. Empty
+elapsed-page state stays omitted through Discord formatting. URL snapshots add
+document visibility; declared query snapshots flag duplicate key names without
+exposing their additional values. Visibility events request an immediate update
+and queue a follow-up when a snapshot is in flight. V1 schemas stay unchanged.
+
+`npm run check`, all **299 extension tests**, and `npm run build` passed. The
+independent V2 repository passed build/check, **36 tests**, the version gate,
+production QuickJS integration, and synthetic Chromium DOM-to-QuickJS checks.
+Those checks cover mode layouts, route/query restrictions, duplicate parameters,
+visibility/readiness clearing, timer resets, Unicode and missing statistics;
+seeded drafts, result snippets, AI responses and tracking stay outside snapshots.
+Live Google and Discord publishing still require an installed-session check.
+The unpacked-extension `npm run test:v2-browser` smoke also passed on Microsoft
+Edge 155.0.4283.45, including strict-CSP USER_SCRIPT injection, offscreen workers,
+credential isolation, presence reporting and lifecycle cleanup.
+
 ## Programmable Activity API v2 sandbox (October 14, 2026)
 
 Implemented on `codex/activity-api-v2-sandbox`, based on the unchanged V1 branch

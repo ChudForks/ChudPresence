@@ -157,7 +157,8 @@ test('query snapshots include only named first values, sanitize credentials, and
   const document = documentFixture();
   document.location.href = 'https://example.com/search?q=public+search&q=second&v=clip123&list=PL123&token=PRIVATE&unrequested=PRIVATE';
   const snapshot = collectActivityV2Snapshot({ queryParameters: ['q', 'v', 'list', 'missing'] }, document);
-  assert.deepEqual(snapshot.page, { query: { q: 'public search', v: 'clip123', list: 'PL123', missing: null } });
+  assert.deepEqual(snapshot.page, { query: { q: 'public search', v: 'clip123', list: 'PL123', missing: null }, queryDuplicates: ['q'] });
+  assert.equal(JSON.stringify(snapshot).includes('second'), false);
   assert.equal(JSON.stringify(snapshot).includes('PRIVATE'), false);
   assert.equal(Object.hasOwn(snapshot.page.query, 'token'), false);
   assert.equal(Object.hasOwn(snapshot.page.query, 'unrequested'), false);
@@ -170,6 +171,15 @@ test('query snapshots include only named first values, sanitize credentials, and
   assert.match(sanitized, /^Find /);
   assert.match(sanitized, /https:\/\/cdn\.example\.com\/image$/);
   assert.doesNotMatch(sanitized, /PRIVATE|two words|alice|fragment/);
+});
+
+test('document visibility is exposed only with URL access', () => {
+  const document = documentFixture();
+  for (const visibilityState of ['visible', 'hidden', 'prerender']) {
+    document.visibilityState = visibilityState;
+    assert.equal(collectActivityV2Snapshot({ url: true }, document).page.visibilityState, visibilityState);
+    assert.deepEqual(collectActivityV2Snapshot({}, document).page, {});
+  }
 });
 
 test('JSON requires a specific own-property path and strips credential keys from selected subtrees', () => {

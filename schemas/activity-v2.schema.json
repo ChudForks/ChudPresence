@@ -380,6 +380,13 @@
             "streaming",
             "generic"
           ]
+        },
+        "navigationGraceMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5000,
+          "default": 0,
+          "description": "Bounded presence retention during navigation within this Activity. Tab close and explicit teardown bypass it."
         }
       }
     },

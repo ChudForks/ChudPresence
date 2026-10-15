@@ -4,14 +4,21 @@ import test from 'node:test';
 import { validateActivityMetadata, validateActivitySource } from '../extension/core/activity-validator.js';
 await import('../extension/core/activity-v2-engine.generated.js');
 
-test('v2 contract adds independent metadata while preserving the exact v1 report schema', async () => {
+test('v2 contract adds metadata and page presentation without changing v1 fields', async () => {
   const read = async path => JSON.parse(await fs.readFile(new URL(path, import.meta.url), 'utf8'));
   const [v1, v2, metadata] = await Promise.all([
     read('../schemas/activity-api-v1.json'), read('../schemas/activity-api-v2.json'), read('../schemas/activity-v2.schema.json'),
   ]);
   assert.equal(v1.apiVersion, 1);
   assert.equal(v2.apiVersion, 2);
-  assert.deepEqual(v2.reportSchema, v1.reportSchema);
+  const report = structuredClone(v2.reportSchema);
+  delete report.properties.display.properties.name;
+  delete report.properties.playback.properties.elapsed;
+  delete report.allOf;
+  report.$id = v1.reportSchema.$id;
+  report.title = v1.reportSchema.title;
+  assert.deepEqual(report, v1.reportSchema);
+  assert.deepEqual(v2.reportSchema, await read('../schemas/activity-v2-report.schema.json'));
   assert.deepEqual(v2.metadataSchema, metadata);
   assert.equal(metadata.properties.apiVersion.const, 2);
   assert.equal(v1.metadataSchema.properties.pageAccess, undefined);

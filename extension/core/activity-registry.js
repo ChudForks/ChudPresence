@@ -81,6 +81,12 @@ export class ActivityRegistry {
     return Boolean(this.entries.get(tabId)?.size);
   }
 
+  hasActivity(activityId, tabId, documentId, frameId) {
+    const entry = this.entries.get(tabId)?.get(normalizeFrameId(frameId));
+    return Boolean(entry && entry.track?.activityId === activityId &&
+      entry.documentId === normalizeDocumentId(documentId));
+  }
+
   tracks(isEligible = () => true) {
     const tracks = new Map();
     for (const [tabId, frames] of this.entries) {

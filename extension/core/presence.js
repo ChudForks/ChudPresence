@@ -138,7 +138,7 @@ function timestamps(playback, nowMs) {
   if (playback.state !== 'playing') return null;
   const position = Math.max(0, Number(playback.position) || 0);
   const now = Math.floor(nowMs / 1000);
-  if (playback.live) return { start: now - Math.floor(position) };
+  if (playback.live || playback.elapsed) return { start: now - Math.floor(position) };
   const duration = Math.max(0, Number(playback.duration) || 0);
   if (!duration || position >= duration) return null;
   return { start: now - Math.floor(position), end: now + Math.ceil(duration - position) };
@@ -159,12 +159,14 @@ export function createPresenceIntent(track, nowMs = Date.now(), settings = {}) {
   const report = reportForTrack(track);
   if (report.visibility !== 'normal' || !report.media?.title) return null;
 
-  const name = cleanText(report.activityName || EXTENSION_NAME, 128);
+  const name = cleanText(report.display.name || report.activityName || EXTENSION_NAME, 128);
   const details = cleanText(report.display.details || report.media.title);
   if (!details) return null;
   const paused = report.playback.state === 'paused';
   const markers = [report.playback.live && 'Live', paused && 'Paused'].filter(Boolean);
-  const state = cleanText(report.display.state || report.media.artist || report.media.creator || name);
+  const state = cleanText(report.playback.elapsed
+    ? report.display.state ?? ''
+    : report.display.state || report.media.artist || report.media.creator || name);
   const type = activityType(report);
   const streamUrl = safeUrl(report.url) || safeUrl(report.buttons?.[0]?.url);
   const art = settings.showArtwork === false ? null : report.artwork;

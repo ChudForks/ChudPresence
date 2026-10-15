@@ -467,6 +467,9 @@ export function collectActivityV2Snapshot(pageAccess, document = globalThis.docu
   const context = { json: new Map(), jsonRemaining: 1048576, outputRemaining: 65536, readsRemaining: 128 };
   if (!document) return snapshot;
   if (access.url) {
+    if (['visible', 'hidden', 'prerender'].includes(document.visibilityState)) {
+      snapshot.page.visibilityState = document.visibilityState;
+    }
     const url = cleanUrl(document.location?.href, document);
     if (url) {
       const parsed = new URL(url);
@@ -476,6 +479,7 @@ export function collectActivityV2Snapshot(pageAccess, document = globalThis.docu
   }
   if (access.queryParameters) {
     const query = {};
+    const duplicates = [];
     let parameters = null;
     try {
       const url = new URL(document.location?.href);
@@ -484,8 +488,11 @@ export function collectActivityV2Snapshot(pageAccess, document = globalThis.docu
     for (const name of access.queryParameters) {
       const value = parameters?.get(name) ?? null;
       query[name] = value === null ? null : publicString(value, document);
+      // Expose only declared key names, never additional parameter values.
+      if (parameters?.getAll(name).length > 1) duplicates.push(name);
     }
     snapshot.page.query = query;
+    if (duplicates.length) snapshot.page.queryDuplicates = duplicates;
   }
   for (const [name, capture] of Object.entries(access.selectors)) {
     const values = [];

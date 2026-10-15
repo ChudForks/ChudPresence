@@ -1,6 +1,6 @@
 # Activity API v2
 
-V2 keeps programmable JavaScript and V1's presence reports while removing an
+V2 keeps programmable JavaScript and V1-compatible presence reports while removing an
 Activity's direct access to the website and the browser. Set `apiVersion: 2` in
 `metadata.json` and ship `activity.js` as before. Load the files in the Library's
 Developer view. The v1 packages and canonical v1 contract remain supported.
@@ -102,13 +102,17 @@ text traversal are bounded. Exhausted budgets can omit later values.
 
 Media snapshots expose playback state and geometry, plus a sanitized poster:
 `currentTime`, `duration`, `paused`, `ended`, `playbackRate`, `muted`, `visible`,
-and `rect`. They omit signed playback sources. `page.info()` exposes only
-`origin` and `pathname` when `url` is declared.
+and `rect`. They omit signed playback sources. When `url` is declared,
+`page.info()` exposes `origin`, `pathname`, and the document's `visibilityState`
+(`visible`, `hidden`, or `prerender`). Visibility changes trigger an immediate
+snapshot, including when an earlier update is still in flight.
 
 For search/video routes, explicitly declare `queryParameters: ["q", "v"]` in
 `pageAccess` and read `page.info().query.q` or `.v`. Only the first value for each
 declared key is exposed (missing keys are `null`), with credential-pattern
-filtering. This works independently of `url: true`. Up to 16 unique public
+filtering. `page.info().queryDuplicates`, when present, lists only declared key
+names that occur more than once; additional values are never exposed. This works
+independently of `url: true`. Up to 16 unique public
 parameter names are allowed; credential/OAuth names such as `token`, `code`,
 `state`, `key`, and `SAMLResponse` are rejected. Undeclared query values and the
 URL fragment stay inaccessible.
@@ -147,11 +151,54 @@ Settings, storage, reports, clearing, logging, and network services are async:
 | --- | --- |
 | `ChudPresence.apiVersion` | `2` |
 | `page.read(name)` / `page.info()` / `media.getAll()` | Current snapshot data |
-| `report(report)` / `clear()` | Existing validated V1 report/clear protocol |
+| `report(report)` / `clear()` | Validated V1-compatible reports and V2 presentation options / clear |
 | `settings.get(id)` / `settings.getAll()` | Activity-defined settings |
 | `storage.get(key)` / `set(key, value)` / `remove(key)` / `clear()` | Activity-scoped JSON storage, 64 KiB total |
 | `net.fetch(url, options)` | `{ status, ok, contentType, data }` |
 | `log.debug/info/warn/error(...args)` | Redacted local diagnostics, up to eight values and 4 KiB |
+
+V2 reports additionally accept `display.name` (a nonempty name up to 256
+characters) to label modes of one Activity. `kind: 'generic'` page activities can
+set `playback.elapsed: true` with `position` in seconds to show an elapsed timer
+without a Live label. They must omit duration (or use zero) and cannot set
+`live: true`. Their empty `display.state` stays omitted in Discord. For example:
+
+```js
+await ChudPresence.report({
+  kind: 'generic', media: { title: 'Submitted query' },
+  display: { name: 'Search Images', details: 'Searching for : Submitted query', state: '', statusDisplay: 'name' },
+  playback: { state: 'playing', elapsed: true, position: 12 }
+});
+```
+
+Use guest `Date.now()` and a closure to measure the current page session, resetting
+it when query, mode, readiness or visibility changes. These fields add no page or
+browser authority. V1 retains its original report contract.
+
+### Presence during navigation
+
+Starting in extension 2.0.1, a V2 package may declare
+`"presence": { "kind": "generic", "navigationGraceMs": 4000 }` in metadata.
+The optional grace is an integer from **0 to 5000 ms**, defaulting to zero.
+The extension retains the outgoing presence for at most that duration when a
+top-level link, form submission or other Navigation API event identifies a new
+document within the package's declared matches (and outside its exclusions).
+A replacement report cancels the deadline and updates the presence directly.
+Repeated unload signals do not extend it. Without a valid navigation hint, the
+existing immediate document-exit cleanup remains in force.
+
+The outgoing guest is stopped immediately; this option delays only its presence
+removal. Tab removal overrides the grace immediately, including if the outgoing
+document has already been retired. Activity teardown, disabling sharing, and a
+closing/failure clear also bypass the pending navigation deadline. Late old
+documents and canceled deadlines cannot erase replacement reports. The browser
+close backup retains its existing immediate cleanup behavior.
+
+This is an extension-enforced metadata preference, not a guest timer or an
+arbitrary delay argument to `clear()`. In-page DOM loading gaps can be handled
+inside the Activity using short, bounded retention across `onUpdate` snapshots.
+An unsupported route or hidden page should still clear rather than retaining
+stale content indefinitely.
 
 The network broker retains v1's declared HTTPS path/origin permissions, user host
 permission checks, GET/POST support, limited headers/body/response sizes,
@@ -188,7 +235,8 @@ not sandbox the V1 Activity. Browser/WASM/QuickJS vulnerabilities remain part of
 the trusted computing base; keep pinned dependencies reviewed and updated.
 
 The JSON contracts are in `schemas/activity-api-v2.json` and
-`schemas/activity-v2.schema.json`; TypeScript declarations are in
+`schemas/activity-v2.schema.json`; the V2 report schema is
+`schemas/activity-v2-report.schema.json`. TypeScript declarations are in
 `schemas/activity-api-v2.d.ts`. The runtime additionally validates selector
 grammar, key safety, byte budgets, and DOM context; schema validation alone is
 insufficient. Generate contracts with `node scripts/generate-v2-contract.mjs` and

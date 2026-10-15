@@ -9,6 +9,10 @@ const metadataSchema = structuredClone(v1.metadataSchema);
 metadataSchema.$id = 'https://chudpresence.local/schemas/activity-v2.schema.json';
 metadataSchema.title = 'ChudPresence sandboxed Activity API v2 metadata';
 metadataSchema.properties.apiVersion = { const: 2 };
+metadataSchema.properties.presence.properties.navigationGraceMs = {
+  type: 'integer', minimum: 0, maximum: 5000, default: 0,
+  description: 'Bounded presence retention during navigation within this Activity. Tab close and explicit teardown bypass it.',
+};
 metadataSchema.properties.pageAccess = {
   type: 'object', additionalProperties: false,
   properties: {
@@ -44,6 +48,15 @@ metadataSchema.properties.pageAccess = {
     },
   },
 };
+const reportSchema = structuredClone(v1.reportSchema);
+reportSchema.$id = 'https://chudpresence.local/schemas/activity-v2-report.schema.json';
+reportSchema.title = 'ChudPresence Activity API v2 Report';
+reportSchema.properties.display.properties.name = { type: 'string', minLength: 1, maxLength: 256, pattern: '\\S' };
+reportSchema.properties.playback.properties.elapsed = { type: 'boolean', description: 'Elapsed time for a generic page activity, without a Live label.' };
+reportSchema.allOf = [{
+  if: { required: ['playback'], properties: { playback: { required: ['elapsed'], properties: { elapsed: { const: true } } } } },
+  then: { properties: { kind: { const: 'generic' }, playback: { properties: { live: { const: false }, duration: { const: 0 } } } } },
+}];
 const contract = {
   schemaVersion: 1, apiVersion: 2, supportedApiVersions: [1, 2],
   execution: 'QuickJS in WebAssembly; package source is data, never native browser JavaScript',
@@ -51,9 +64,9 @@ const contract = {
     requestBytes: 65536, resultBytes: 262144, pendingRequests: 16, requestsPerWindow: 30,
     requestWindowMs: 10000, pendingJobs: 256, updateIntervalMs: 2000,
     workerStartupMs: 5000, workerExecutionMs: 2000, workerInactivityMs: 120000, workerSessions: 16 },
-  metadataSchema, reportSchema: v1.reportSchema,
+  metadataSchema, reportSchema,
 };
-for (const [name, value] of Object.entries({ 'activity-api-v2.json': contract, 'activity-v2.schema.json': metadataSchema })) {
+for (const [name, value] of Object.entries({ 'activity-api-v2.json': contract, 'activity-v2.schema.json': metadataSchema, 'activity-v2-report.schema.json': reportSchema })) {
   const destination = path.join(root, 'schemas', name);
   const output = `${JSON.stringify(value, null, 2)}\n`;
   if (process.argv.includes('--check')) assert.equal(await fs.readFile(destination, 'utf8'), output, `${name} is stale.`);

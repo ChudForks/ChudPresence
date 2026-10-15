@@ -745,6 +745,7 @@ export class ActivityManager {
     this.fetchImpl = fetchImpl;
     this.records = null;
     this.lastSeen = new Map();
+    this.removedTabs = new Set();
     this.reportRates = new Map();
     this.activeNetworkRequests = 0;
     this.activeNetworkByActivity = new Map();
@@ -771,7 +772,7 @@ export class ActivityManager {
           try { port.postMessage({ type: 'CHUDPRESENCE_ACTIVITY_ABORT', activityId: session.identity.activityId,
             activityVersion: session.identity.activityVersion, reason: 'sandbox-error' }); } catch {}
         }
-        await this.handleUserScriptMessage({ ...session.identity, requestId: 'host-clear', operation: 'presence.clear', payload: {} }, session.sender);
+        await this.handleUserScriptMessage({ ...session.identity, requestId: 'host-clear', operation: 'presence.clear', payload: { closing: true } }, session.sender);
       },
     });
   }
@@ -1991,7 +1992,7 @@ export class ActivityManager {
     if (!record || record.metadata.id !== id || !record.enabled ||
         (typeof worldId === 'string' && worldId !== activityWorldId(id, record.metadata.apiVersion)) ||
         !ACTIVITY_CAPABILITY_PATTERN.test(record.capability || '') || message.capability !== record.capability ||
-        typeof tabId !== 'number') return false;
+        typeof tabId !== 'number' || this.removedTabs.has(tabId)) return false;
     if (structured && message.activityVersion !== record.metadata.version) return false;
     // V2 has no legacy request path or arbitrary main-world execution escape.
     // Enforce this here even if a future guest bridge exposes more operations.
@@ -2222,7 +2223,15 @@ export class ActivityManager {
       if (!frames.size) tabs.delete(tabId);
       if (!tabs.size) this.lastSeen.delete(id);
       if (structured && message.payload?.closing === true) {
-        await this.onClear(id, tabId, messageDocumentId, frameId, { closing: true });
+        const navigationUrl = message.payload?.navigationUrl;
+        const navigationGraceMs = record.metadata.apiVersion === 2 && frameId === 0 &&
+          typeof navigationUrl === 'string' && navigationUrl.length <= 8192 &&
+          record.metadata.matches.some(pattern => safeMatch(pattern, navigationUrl)) &&
+          !(record.metadata.excludeMatches || []).some(pattern => safeMatch(pattern, navigationUrl))
+          ? record.metadata.presence?.navigationGraceMs || 0 : 0;
+        await this.onClear(id, tabId, messageDocumentId, frameId, {
+          closing: true, ...(navigationGraceMs > 0 ? { navigationGraceMs } : {}),
+        });
       } else {
         await this.onClear(id, tabId, messageDocumentId, frameId);
       }
@@ -2318,6 +2327,7 @@ export class ActivityManager {
         return respond(false, null, 'stale_document', 'This Activity document has already been replaced.');
       }
     }
+    if (this.removedTabs.has(tabId)) return respond(false, null, 'stale_document', 'The Activity tab has closed.');
     await this.onReport({
       activityId: id,
       documentId: sender.documentId || null,
@@ -2405,8 +2415,14 @@ export class ActivityManager {
     });
   }
 
-  async invalidateTab(tabId, { retireDocuments = true } = {}) {
+  async invalidateTab(tabId, { retireDocuments = true, removed = false } = {}) {
     if (!Number.isInteger(tabId)) return 0;
+    if (removed) {
+      // Messages queued before tabs.onRemoved can arrive after worker teardown.
+      // Retire the tab before any await so they cannot recreate its VM/presence.
+      this.removedTabs.add(tabId);
+      while (this.removedTabs.size > 1024) this.removedTabs.delete(this.removedTabs.values().next().value);
+    }
     if (retireDocuments) this.v2Host.stopTab(tabId);
     const callbacks = [];
     let invalidated = 0;

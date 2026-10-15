@@ -228,9 +228,15 @@ export function validateActivityMetadata(metadata) {
     if (metadata[field] !== undefined) cleanHttpsUrl(metadata[field], 'url');
   }
   if (metadata.presence !== undefined &&
-      (!isPlainObject(metadata.presence) || Object.keys(metadata.presence).some((key) => key !== 'kind') ||
+      (!isPlainObject(metadata.presence) || Object.keys(metadata.presence).some((key) =>
+        key !== 'kind' && !(metadata.apiVersion === 2 && key === 'navigationGraceMs')) ||
        (metadata.presence.kind !== undefined && !PRESENCE_KINDS.has(metadata.presence.kind)))) {
-    fail('Activity presence may contain only a supported kind.');
+    fail('Activity presence contains an unsupported field or kind.');
+  }
+  if (metadata.presence?.navigationGraceMs !== undefined &&
+      (!Number.isInteger(metadata.presence.navigationGraceMs) || metadata.presence.navigationGraceMs < 0 ||
+       metadata.presence.navigationGraceMs > 5000)) {
+    fail('Activity presence.navigationGraceMs must be an integer between 0 and 5000.');
   }
   if (metadata.settingsUi !== undefined) {
     const ui = metadata.settingsUi;
@@ -434,9 +440,41 @@ function normalizeActivityReportV1(report) {
   return normalized;
 }
 
+function normalizeActivityReportV2(report) {
+  if (!isPlainObject(report)) fail('Activity report must be a JSON object.');
+  const input = { ...report };
+  let name;
+  let elapsed;
+  if (isPlainObject(report.display)) {
+    input.display = { ...report.display };
+    name = input.display.name;
+    delete input.display.name;
+  }
+  if (isPlainObject(report.playback)) {
+    input.playback = { ...report.playback };
+    elapsed = input.playback.elapsed;
+    delete input.playback.elapsed;
+  }
+  const normalized = normalizeActivityReportV1(input);
+  if (name !== undefined) {
+    normalized.display.name = cleanText(name, 'display.name', { required: true });
+  }
+  if (elapsed !== undefined) {
+    if (typeof elapsed !== 'boolean') fail('playback.elapsed must be a boolean.');
+    if (elapsed && (normalized.kind !== 'generic' || normalized.playback.live || normalized.playback.duration)) {
+      fail('Elapsed page activities require kind generic, no live playback, and no duration.');
+    }
+    normalized.playback.elapsed = elapsed;
+  }
+  if (new TextEncoder().encode(JSON.stringify(normalized)).byteLength > MAX_ACTIVITY_REPORT_BYTES) {
+    fail('Activity report exceeds the 16 KB size limit.');
+  }
+  return normalized;
+}
+
 const REPORT_NORMALIZERS = new Map([
   [1, normalizeActivityReportV1],
-  [2, normalizeActivityReportV1],
+  [2, normalizeActivityReportV2],
 ]);
 
 export function normalizeActivityReport(report, apiVersion = LATEST_ACTIVITY_API_VERSION) {
