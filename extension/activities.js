@@ -670,12 +670,24 @@ async function refreshCatalog() {
 
 async function ensureActivityPermissions(matches, noticeElement = catalogNotice) {
   if (isFirefox) {
-    // Both requests originate from the install/enable click before any download.
-    const granted = await api.permissions.request({ permissions: ['userScripts'], origins: matches });
-    if (!granted) throw new Error('Activity scripts or the requested website access was not granted.');
-    if (typeof api.userScripts?.execute !== 'function') throw new Error(USER_SCRIPTS_UNAVAILABLE);
-    userScriptsAvailable = true;
+    if (!userScriptsAvailable) {
+      // Firefox marks userScripts as optional-only, so request it by itself.
+      const scriptsGranted = await api.permissions.request({ permissions: ['userScripts'] });
+      if (!scriptsGranted) throw new Error('The Firefox User Scripts permission was not granted.');
+      if (typeof api.userScripts?.execute !== 'function') throw new Error(USER_SCRIPTS_UNAVAILABLE);
+      userScriptsAvailable = true;
+      nextPermissionStep = 'User Scripts allowed · click the action again to approve site access';
+      await refreshInstalled();
+      const message = 'Firefox granted User Scripts access. Click the action again to approve this Activity’s site/network access and continue.';
+      if (noticeElement) setNotice(noticeElement, message, 'success');
+      else setHeaderStatus(message, 'on');
+      return false;
+    }
+
+    // Request the Activity's declared site and network origins separately.
     nextPermissionStep = '';
+    const hostsAllowed = await requestHostPermissions(matches, api);
+    if (!hostsAllowed) throw new Error('The Activity’s declared site or network access was not granted. It was not installed.');
     return true;
   }
   if (!userScriptsAvailable || !api.userScripts?.execute) {
