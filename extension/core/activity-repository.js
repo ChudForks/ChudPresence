@@ -11,15 +11,42 @@ import { ACTIVITY_KIND_VALUES } from './activity-contract.generated.js';
 import { MAX_ACTIVITY_ICON_BYTES, MAX_ACTIVITY_METADATA_BYTES } from './activity-contract.generated.js';
 import { validateActivityV2PageAccess } from './activity-v2-page.js';
 
-export const ACTIVITY_REPOSITORY = Object.freeze({
+export const ACTIVITY_REPOSITORIES = Object.freeze([
+  'ChudPresence-Activities',
+  'ChudPresence-Activities-V2',
+].map((name) => Object.freeze({
   owner: 'ChudForks',
-  name: 'ChudPresence-Activities',
+  name,
   branch: 'main',
-  baseUrl: 'https://raw.githubusercontent.com/ChudForks/ChudPresence-Activities/main/',
-  rawBaseUrl: 'https://raw.githubusercontent.com/ChudForks/ChudPresence-Activities/',
-  apiBaseUrl: 'https://api.github.com/repos/ChudForks/ChudPresence-Activities/',
+  baseUrl: `https://raw.githubusercontent.com/ChudForks/${name}/main/`,
+  rawBaseUrl: `https://raw.githubusercontent.com/ChudForks/${name}/`,
+  apiBaseUrl: `https://api.github.com/repos/ChudForks/${name}/`,
   catalogPath: 'catalog.json',
-});
+})));
+
+export const ACTIVITY_REPOSITORY = ACTIVITY_REPOSITORIES[0];
+
+function repositoryId(repository) {
+  return `${repository.owner}/${repository.name}`;
+}
+
+export function getActivityRepository(id) {
+  return ACTIVITY_REPOSITORIES.find((repository) => repositoryId(repository) === id);
+}
+
+function validRevision(value) {
+  return typeof value === 'string' && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(value);
+}
+
+function validCatalogSource(source) {
+  return source && getActivityRepository(source.repository) && validRevision(source.revision);
+}
+
+function catalogSources(catalog) {
+  return catalog?.sources || (validRevision(catalog?.revision)
+    ? [{ repository: repositoryId(ACTIVITY_REPOSITORY), revision: catalog.revision }]
+    : []);
+}
 
 const CATALOG_CACHE_KEY = 'activityCatalogCache';
 const CATALOG_FETCHED_KEY = 'activityCatalogFetchedAt';
@@ -63,8 +90,14 @@ export function validateCatalog(value) {
       !Array.isArray(value.activities) || value.activities.length > 2000) {
     throw new Error('The Activities repository catalog has an unsupported format.');
   }
-  if (value.revision !== undefined && !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(value.revision)) {
+  if (value.revision !== undefined && !validRevision(value.revision)) {
     throw new Error('The Activities repository catalog has an invalid repository revision.');
+  }
+  if (value.sources !== undefined && (!Array.isArray(value.sources) ||
+      value.sources.length > ACTIVITY_REPOSITORIES.length ||
+      !value.sources.every(validCatalogSource) ||
+      new Set(value.sources.map((source) => source.repository)).size !== value.sources.length)) {
+    throw new Error('The Activities catalog has invalid repository sources.');
   }
   const seen = new Set();
   for (const entry of value.activities) {
@@ -72,6 +105,11 @@ export function validateCatalog(value) {
       throw new Error('The Activities repository catalog contains an invalid or duplicate entry.');
     }
     seen.add(entry.id);
+    if ((entry.catalogSource !== undefined && !validCatalogSource(entry.catalogSource)) ||
+        (value.sources !== undefined && !value.sources.some((source) =>
+          source.repository === entry.catalogSource?.repository && source.revision === entry.catalogSource?.revision))) {
+      throw new Error(`The catalog entry for ${entry.id} has an invalid repository source.`);
+    }
     if (!safeRepositoryPath(entry.metadata, entry.id, 'metadata.json') ||
         !safeRepositoryPath(entry.entry, entry.id, 'activity.js') ||
         !/^[a-f0-9]{64}$/i.test(entry.metadataSha256 || '') ||
@@ -159,12 +197,18 @@ export function validateCatalog(value) {
   return value;
 }
 
-async function responseText(path, maxBytes, baseUrl = ACTIVITY_REPOSITORY.baseUrl) {
+function repositoryUrl(path, baseUrl) {
   const url = new URL(path, baseUrl);
   const base = new URL(baseUrl);
-  if (url.origin !== base.origin || !url.pathname.startsWith('/ChudForks/ChudPresence-Activities/')) {
+  if (!ACTIVITY_REPOSITORIES.some((repository) => base.href.startsWith(repository.rawBaseUrl)) ||
+      url.origin !== base.origin || !url.pathname.startsWith(base.pathname) || url.search || url.hash) {
     throw new Error('Activity repository path is outside the configured repository.');
   }
+  return url;
+}
+
+async function responseText(path, maxBytes, baseUrl) {
+  const url = repositoryUrl(path, baseUrl);
   const response = await fetch(url, {
     cache: 'no-store',
     credentials: 'omit',
@@ -179,12 +223,8 @@ async function responseText(path, maxBytes, baseUrl = ACTIVITY_REPOSITORY.baseUr
   return text;
 }
 
-async function responseBytes(path, maxBytes, baseUrl = ACTIVITY_REPOSITORY.baseUrl) {
-  const url = new URL(path, baseUrl);
-  const base = new URL(baseUrl);
-  if (url.origin !== base.origin || !url.pathname.startsWith('/ChudForks/ChudPresence-Activities/')) {
-    throw new Error('Activity repository path is outside the configured repository.');
-  }
+async function responseBytes(path, maxBytes, baseUrl) {
+  const url = repositoryUrl(path, baseUrl);
   const response = await fetch(url, {
     cache: 'no-store',
     credentials: 'omit',
@@ -205,8 +245,8 @@ async function sha256(value) {
   return [...new Uint8Array(bytes)].map((value) => value.toString(16).padStart(2, '0')).join('');
 }
 
-async function repositoryRevision() {
-  const response = await fetch(new URL('commits/main', ACTIVITY_REPOSITORY.apiBaseUrl), {
+async function repositoryRevision(repository) {
+  const response = await fetch(new URL(`commits/${repository.branch}`, repository.apiBaseUrl), {
     cache: 'no-store',
     credentials: 'omit',
     redirect: 'error',
@@ -247,32 +287,67 @@ export async function readCatalogCache() {
 
 export async function fetchCatalog({ force = false } = {}) {
   const cached = await readCatalogCache();
-  if (!force && cached.catalog?.revision) return { ...cached, fromCache: true };
-  const revision = await repositoryRevision();
-  const immutableBase = `${ACTIVITY_REPOSITORY.rawBaseUrl}${revision}/`;
-  const text = await responseText(ACTIVITY_REPOSITORY.catalogPath, MAX_CATALOG_BYTES, immutableBase);
-  let catalog;
-  try {
-    catalog = validateCatalog({ ...JSON.parse(text), revision });
-  } catch (error) {
-    throw new Error(`Could not read the Activities catalog: ${error.message}`);
+  if (!force && cached.catalog?.sources?.length === ACTIVITY_REPOSITORIES.length) {
+    return { ...cached, fromCache: true, warnings: [] };
   }
+  const results = await Promise.allSettled(ACTIVITY_REPOSITORIES.map(async (repository) => {
+    const revision = await repositoryRevision(repository);
+    const immutableBase = `${repository.rawBaseUrl}${revision}/`;
+    const text = await responseText(repository.catalogPath, MAX_CATALOG_BYTES, immutableBase);
+    const catalog = validateCatalog({ ...JSON.parse(text), revision });
+    const source = { repository: repositoryId(repository), revision };
+    return { source, activities: catalog.activities.map((entry) => ({ ...entry, catalogSource: source })) };
+  }));
+  const sources = [];
+  const activities = new Map();
+  const warnings = [];
+  for (const [index, result] of results.entries()) {
+    const id = repositoryId(ACTIVITY_REPOSITORIES[index]);
+    let sourceCatalog;
+    if (result.status === 'fulfilled') {
+      sourceCatalog = result.value;
+    } else {
+      const source = catalogSources(cached.catalog).find((source) => source.repository === id);
+      warnings.push(`Could not refresh ${id}. ${source ? 'Using its cached Activities. ' : ''}${result.reason.message}`);
+      if (!source) continue;
+      sourceCatalog = { source, activities: cached.catalog.activities
+        .filter((entry) => (entry.catalogSource?.repository || repositoryId(ACTIVITY_REPOSITORY)) === id)
+        .map((entry) => ({ ...entry, catalogSource: source })) };
+    }
+    sources.push(sourceCatalog.source);
+    // Activity IDs are shared across the library. Prefer the V2 repository on a collision.
+    for (const entry of sourceCatalog.activities) activities.set(entry.id, entry);
+  }
+  if (results.every((result) => result.status === 'rejected')) throw new Error(warnings.join(' '));
+  const catalog = validateCatalog({ schemaVersion: 1, sources, activities: [...activities.values()] });
   const fetchedAt = Date.now();
   await storageApi().set({
     [CATALOG_CACHE_KEY]: catalog,
     [CATALOG_FETCHED_KEY]: fetchedAt,
   });
-  return { catalog, fetchedAt, fromCache: false };
+  return { catalog, fetchedAt, fromCache: false, warnings };
+}
+
+export function activityCatalogIconUrl({ id, icon, catalogSource }) {
+  if (!isActivityId(id) || !safeRepositoryPath(icon, id, 'icon.png')) return '';
+  if (catalogSource !== undefined && !validCatalogSource(catalogSource)) return '';
+  const repository = catalogSource ? getActivityRepository(catalogSource.repository) : ACTIVITY_REPOSITORY;
+  const baseUrl = catalogSource ? `${repository.rawBaseUrl}${catalogSource.revision}/` : repository.baseUrl;
+  return new URL(icon, baseUrl).href;
 }
 
 export async function downloadActivity(activityId, catalog) {
   const entry = catalog?.activities?.find((item) => item.id === activityId);
   if (!entry) throw new Error(`Activity ${activityId} is not present in the catalog.`);
-  const revision = catalog.revision || await repositoryRevision();
-  if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(revision)) {
+  if (entry.catalogSource !== undefined && !validCatalogSource(entry.catalogSource)) {
+    throw new Error('Activity catalog does not identify a valid repository source.');
+  }
+  const repository = entry.catalogSource ? getActivityRepository(entry.catalogSource.repository) : ACTIVITY_REPOSITORY;
+  const revision = entry.catalogSource?.revision || catalog.revision || await repositoryRevision(repository);
+  if (!validRevision(revision)) {
     throw new Error('Activity catalog does not identify a valid repository revision.');
   }
-  const immutableBase = `${ACTIVITY_REPOSITORY.rawBaseUrl}${revision}/`;
+  const immutableBase = `${repository.rawBaseUrl}${revision}/`;
   const [metadataText, source, iconBytes] = await Promise.all([
     responseText(entry.metadata, MAX_METADATA_BYTES, immutableBase),
     responseText(entry.entry, MAX_ACTIVITY_SOURCE_BYTES, immutableBase),
@@ -317,7 +392,7 @@ export async function downloadActivity(activityId, catalog) {
     ...(icon ? { icon } : {}),
     sourceType: 'repository',
     provenance: {
-      repository: `${ACTIVITY_REPOSITORY.owner}/${ACTIVITY_REPOSITORY.name}`,
+      repository: repositoryId(repository),
       revision: revision.toLowerCase(),
       codeSha256: entry.sha256.toLowerCase(),
       metadataSha256: entry.metadataSha256.toLowerCase(),

@@ -61,6 +61,27 @@ test('v2 registers only the page broker in a distinct world without native eval 
   assert.doesNotMatch(script.js[1].code, /"source":/);
 });
 
+test('installs V2 repository packages with verified provenance and rejects untrusted repositories or changed code', async () => {
+  const { manager } = fixture();
+  const metadataSource = JSON.stringify(metadata);
+  const hash = async (value) => {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+    return Buffer.from(digest).toString('hex');
+  };
+  const provenance = {
+    repository: 'ChudForks/ChudPresence-Activities-V2', revision: 'b'.repeat(40),
+    codeSha256: await hash(source), metadataSha256: await hash(metadataSource),
+  };
+  const activityPackage = { metadata, metadataSource, source, sourceType: 'repository', provenance };
+  await manager.install(activityPackage);
+  assert.deepEqual((await manager.get(metadata.id)).source, { type: 'repository', ...provenance });
+  assert.equal((await manager.get(metadata.id)).metadata.apiVersion, 2);
+  await assert.rejects(manager.install({ ...activityPackage, source: `${source}\n// modified` }), /code no longer matches/);
+  await assert.rejects(manager.install({ ...activityPackage,
+    provenance: { ...provenance, repository: 'someone/ChudPresence-Activities-V2' },
+  }), /missing valid immutable provenance/);
+});
+
 test('restoring v2 after a worker restart reinstates its strict world CSP', async () => {
   const { manager, calls } = fixture();
   const result = await manager.restoreAll();

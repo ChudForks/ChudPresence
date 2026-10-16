@@ -17,7 +17,7 @@ import {
   normalizeActivitySettings,
   normalizeActivityPreferences,
 } from './activity-settings.js';
-import { compareActivityVersions } from './activity-repository.js';
+import { compareActivityVersions, getActivityRepository } from './activity-repository.js';
 import { activityV2ScriptDefinition } from './activity-v2-runtime.js';
 import { ActivityV2HostClient } from './activity-v2-host-client.js';
 
@@ -1185,7 +1185,7 @@ export class ActivityManager {
     let source = { type: sourceType };
     if (sourceType === 'repository') {
       const provenance = activityPackage?.provenance;
-      if (!provenance || provenance.repository !== 'ChudForks/ChudPresence-Activities' ||
+      if (!provenance || !getActivityRepository(provenance.repository) ||
           !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(provenance.revision || '') ||
           !/^[a-f0-9]{64}$/i.test(provenance.codeSha256 || '') ||
           !/^[a-f0-9]{64}$/i.test(provenance.metadataSha256 || '') ||

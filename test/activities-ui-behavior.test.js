@@ -4,7 +4,7 @@ import test from 'node:test';
 import vm from 'node:vm';
 import * as validator from '../extension/core/activity-validator.js';
 import * as developerDiagnostics from '../extension/core/developer-diagnostics.js';
-import { compareActivityVersions } from '../extension/core/activity-repository.js';
+import { activityCatalogIconUrl, compareActivityVersions } from '../extension/core/activity-repository.js';
 
 class Element {
   constructor(tag = 'div') {
@@ -124,7 +124,7 @@ async function createLibrary({ installed = [], catalog = null, developerMode = f
     navigator: { clipboard: { async writeText(value) { if (failCopy) throw new Error('Clipboard unavailable'); copied.push(value); } } },
     location: { href: 'https://example.test/activities.html' },
     Option: class extends Element { constructor(label, value) { super('option'); this.textContent = label; this.value = value; } },
-    ACTIVITY_REPOSITORY: { baseUrl: 'https://example.test/' },
+    activityCatalogIconUrl,
     compareActivityVersions,
     readCatalogCache: async () => ({ catalog, fetchedAt: 0 }),
     requestHostPermissions: async () => true,
@@ -280,6 +280,18 @@ function pageAccessLibrary() {
     { ...entry, version: '1.0.0', enabled: true, status: 'waiting', source: { type: 'repository' } },
   ] };
 }
+
+test('Discover, Installed, and Updates load V2 catalog icons from the pinned V2 repository', async () => {
+  const state = pageAccessLibrary();
+  const entry = state.catalog.activities[0];
+  entry.icon = `activities/${entry.id}/icon.png`;
+  entry.catalogSource = { repository: 'ChudForks/ChudPresence-Activities-V2', revision: 'b'.repeat(40) };
+  const ui = await createLibrary(state);
+  for (const grid of ['discover-list', 'installed-list', 'updates-list']) {
+    assert.equal(ui.elements.get(grid).querySelector('.activity-logo-image').src,
+      `https://raw.githubusercontent.com/ChudForks/ChudPresence-Activities-V2/${'b'.repeat(40)}/${entry.icon}`);
+  }
+});
 
 test('Live diagnostics update without replacing unchanged cards in any Library grid', async () => {
   const state = pageAccessLibrary();

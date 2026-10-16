@@ -1,4 +1,4 @@
-import { ACTIVITY_REPOSITORY, compareActivityVersions, downloadActivity, fetchCatalog, readCatalogCache } from './core/activity-repository.js';
+import { activityCatalogIconUrl, compareActivityVersions, downloadActivity, fetchCatalog, readCatalogCache } from './core/activity-repository.js';
 import { requestHostPermissions } from './core/activity-permissions.js';
 import { diagnosticEntryCount, formatDeveloperDiagnostics } from './core/developer-diagnostics.js';
 import {
@@ -259,23 +259,17 @@ function actionButton(text, className, action, disabled = false) {
   return button;
 }
 
-function repositoryCardIcon(id, icon) {
-  if (typeof id !== 'string' || typeof icon !== 'string') return '';
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id) || icon !== `activities/${id}/icon.png`) return '';
-  return `${ACTIVITY_REPOSITORY.baseUrl}${icon}`;
-}
-
-function cardIcon(id, icon) {
+function cardIcon(id, icon, catalogSource) {
   if (icon?.startsWith('data:image/png;base64,')) return icon;
-  return repositoryCardIcon(id, icon);
+  return activityCatalogIconUrl({ id, icon, catalogSource });
 }
 
-function baseCard({ id, name, description, category, version, matches, apiVersion = 1, pageAccess, icon = '', local = false }) {
+function baseCard({ id, name, description, category, version, matches, apiVersion = 1, pageAccess, icon = '', catalogSource, local = false }) {
   const card = element('article', 'activity-card');
   card.dataset.activityId = id;
   if (/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id)) card.classList.add(`activity-${id}`);
   const art = element('div', 'card-art');
-  const artIcon = cardIcon(id, icon);
+  const artIcon = cardIcon(id, icon, catalogSource);
   if (artIcon) {
     const watermark = element('img', 'card-watermark');
     watermark.src = artIcon;
@@ -362,7 +356,7 @@ function renderDiscover() {
     const empty = element('div');
     appendEmpty(empty, catalog ? 'No matching Activities' : 'Catalog not connected', catalog
       ? 'Try a different search or category.'
-      : 'Use Refresh catalog to connect to ChudForks/ChudPresence-Activities.');
+      : 'Use Refresh catalog to connect to the ChudPresence V1 and V2 repositories.');
     replaceLibraryCards(discoverList, [...empty.children]);
     return;
   }
@@ -478,6 +472,7 @@ function renderInstalled() {
     record.id, record.name, record.description, record.category, record.version,
     record.matches, record.apiVersion, record.pageAccess, record.network,
     record.icon || catalog?.activities?.find((entry) => entry.id === record.id)?.icon,
+    catalog?.activities?.find((entry) => entry.id === record.id)?.catalogSource,
     record.source?.type, record.enabled, record.status, record.compatibilityStatus,
     record.error, record.settings, record.settingValues,
   ])]);
@@ -499,10 +494,11 @@ function renderInstalled() {
     return;
   }
   for (const record of installed) {
-    const catalogIcon = catalog?.activities?.find((entry) => entry.id === record.id)?.icon || '';
+    const catalogEntry = catalog?.activities?.find((entry) => entry.id === record.id);
     const { card, actions } = baseCard({
       ...record,
-      icon: record.icon || catalogIcon,
+      icon: record.icon || catalogEntry?.icon || '',
+      catalogSource: catalogEntry?.catalogSource,
       local: record.source?.type === 'local',
     });
     card.classList.add('installed-activity-card');
@@ -650,7 +646,10 @@ async function refreshCatalog() {
     catalog = result.catalog;
     describeCatalog(false, result.fetchedAt);
     renderCategories();
-    setNotice(catalogNotice, `Loaded ${catalog.activities.length} Activities from ChudForks/ChudPresence-Activities.`, 'success');
+    const warnings = result.warnings || [];
+    setNotice(catalogNotice, warnings.length
+      ? `Loaded ${catalog.activities.length} Activities. ${warnings.join(' ')}`
+      : `Loaded ${catalog.activities.length} Activities from the ChudPresence V1 and V2 repositories.`, warnings.length ? 'error' : 'success');
     await refreshInstalled();
   } catch (error) {
     const cached = await readCatalogCache().catch(() => ({ catalog: null, fetchedAt: 0 }));
@@ -899,7 +898,7 @@ async function initialize() {
   if (catalog) {
     setNotice(catalogNotice, '');
   } else {
-    setNotice(catalogNotice, 'Connect to the ChudForks/ChudPresence-Activities catalog, or load an Activity locally in Developer.');
+    setNotice(catalogNotice, 'Connect to the ChudPresence V1 and V2 catalogs, or load an Activity locally in Developer.');
   }
   const requestedView = new URL(location.href).searchParams.get('view');
   if (['discover', 'installed', 'updates', 'developer'].includes(requestedView)) showView(requestedView);
