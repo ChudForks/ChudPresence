@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const extension = path.join(root, 'extension');
+const firefoxExtension = path.join(root, 'ChudPresence-Firefox', 'extension');
 
 async function javascriptFiles(directory) {
   const found = [];
@@ -18,8 +19,11 @@ async function javascriptFiles(directory) {
 }
 
 JSON.parse(await fs.readFile(path.join(extension, 'manifest.json'), 'utf8'));
+const firefoxManifest = JSON.parse(await fs.readFile(path.join(firefoxExtension, 'manifest.json'), 'utf8'));
+assert.equal(firefoxManifest.version, JSON.parse(await fs.readFile(path.join(extension, 'manifest.json'), 'utf8')).version,
+  'Firefox and Chromium manifest versions differ');
 execFileSync(process.execPath, ['scripts/generate-v2-contract.mjs', '--check'], { cwd: root, stdio: 'inherit' });
-for (const file of await javascriptFiles(extension)) {
+for (const file of [...await javascriptFiles(extension), ...await javascriptFiles(firefoxExtension)]) {
   execFileSync(process.execPath, ['--check', file], { stdio: 'inherit' });
 }
 const activities = path.join(root, 'ChudPresence-Activities');
@@ -80,4 +84,4 @@ if (activitiesContractAvailable) {
     throw new Error('The extension runtime contract is out of sync with the Activities canonical contract.');
   }
 }
-console.log('Manifest, extension JavaScript, shared Activity API contract, and catalog hashes are valid.');
+console.log('Chromium and Firefox manifests, extension JavaScript, shared Activity API contract, and catalog hashes are valid.');

@@ -1,4 +1,5 @@
-// The offscreen document hosts trusted worker plumbing only. Activity source
+import { browserApi } from '../platform/browser-api.js';
+// The host document runs trusted worker plumbing only. Activity source
 // remains data here and is executed solely in the worker's QuickJS guest.
 const PORT_NAME = 'chudpresence-v2-host';
 const MAX_SESSIONS = 16;

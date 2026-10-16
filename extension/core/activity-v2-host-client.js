@@ -1,13 +1,15 @@
 // Service-worker side of the private offscreen host channel. Guest workers see
 // an opaque key and JSON only; their installed ownership capability stays here.
 import { acquireActivitySandboxDocument, releaseActivitySandboxDocument } from '../discord/shutdown-cleanup.js';
+import { isBackgroundSuspending } from '../platform/browser-api.js';
 export class ActivityV2HostClient {
-  constructor({ api, onRequest, onFailure, acquireDocument, releaseDocument } = {}) {
+  constructor({ api, onRequest, onFailure, acquireDocument, releaseDocument, isSuspending = isBackgroundSuspending } = {}) {
     this.api = api;
     this.onRequest = onRequest;
     this.onFailure = onFailure;
     this.acquireDocument = acquireDocument;
     this.releaseDocument = releaseDocument;
+    this.isSuspending = isSuspending;
     this.sessions = new Map();
     this.failedContexts = new Map();
     this.port = null;
@@ -28,7 +30,7 @@ export class ActivityV2HostClient {
       this.port = null;
       for (const session of [...this.sessions.values()]) {
         this.stop(session.key);
-        void this.onFailure(session, 'Activity sandbox host disconnected.');
+        if (!this.isSuspending()) void this.onFailure(session, 'Activity sandbox host disconnected.');
       }
     });
     return true;

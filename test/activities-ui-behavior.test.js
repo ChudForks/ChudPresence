@@ -4,6 +4,7 @@ import test from 'node:test';
 import vm from 'node:vm';
 import * as validator from '../extension/core/activity-validator.js';
 import * as developerDiagnostics from '../extension/core/developer-diagnostics.js';
+import * as browserPlatform from '../extension/platform/browser-api.js';
 import { activityCatalogIconUrl, compareActivityVersions } from '../extension/core/activity-repository.js';
 
 class Element {
@@ -120,7 +121,7 @@ async function createLibrary({ installed = [], catalog = null, developerMode = f
     userScripts: { execute() {} },
   };
   const context = vm.createContext({
-    ...validator, ...developerDiagnostics, document, chrome, JSON, URL, Uint8Array, btoa, structuredClone,
+    ...validator, ...developerDiagnostics, ...browserPlatform, document, chrome, JSON, URL, Uint8Array, btoa, structuredClone,
     navigator: { clipboard: { async writeText(value) { if (failCopy) throw new Error('Clipboard unavailable'); copied.push(value); } } },
     location: { href: 'https://example.test/activities.html' },
     Option: class extends Element { constructor(label, value) { super('option'); this.textContent = label; this.value = value; } },

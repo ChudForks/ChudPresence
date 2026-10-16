@@ -9,12 +9,18 @@
     "test": "node --test test/*.test.js",
     "test:v2-browser": "node scripts/test-v2-browser.mjs",
     "build": "node scripts/build.mjs",
+    "build:chromium": "node scripts/build.mjs chromium",
+    "build:firefox": "node scripts/build.mjs firefox",
+    "build:all": "node scripts/build.mjs all",
+    "check:packages": "node scripts/check-packages.mjs",
+    "lint:firefox": "node scripts/lint-firefox.mjs",
     "build:v2-engine": "node scripts/build-v2-engine.mjs"
   },
   "engines": {
     "node": ">=20"
   },
   "devDependencies": {
+    "addons-linter": "10.14.0",
     "esbuild": "0.25.12",
     "quickjs-emscripten": "0.32.0"
   }

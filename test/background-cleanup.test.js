@@ -7,6 +7,7 @@ import { ActivityRegistry } from '../extension/core/activity-registry.js';
 import { createPresenceIntent } from '../extension/core/presence.js';
 import { createPresenceClearDelay } from '../extension/core/presence-clear-delay.js';
 import * as settings from '../extension/core/settings.js';
+import { migratePlatformSettings } from '../extension/platform/migration.js';
 
 const source = (await readFile(new URL('../extension/background.js', import.meta.url), 'utf8'))
   .replace(/^import[\s\S]*?from '[^']+';\r?\n/gm, '');
@@ -34,7 +35,7 @@ async function createBackgroundHarness(activityPreferences = {}) {
   };
   vm.runInNewContext(source, {
     ...settings,
-    chrome, selectActivity, ActivityRegistry, createPresenceIntent,
+    chrome, isFirefox: false, selectActivity, ActivityRegistry, createPresenceIntent, migratePlatformSettings,
     ActivityManager: class {
       constructor(callbacks) { managerCallbacks = callbacks; }
       restoreAll() { return Promise.resolve(); }

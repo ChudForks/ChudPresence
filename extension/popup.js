@@ -1,3 +1,4 @@
+import { browserApi } from './platform/browser-api.js';
 import { DEFAULT_SETTINGS, normalizeSettings } from './core/settings.js';
 import { DEFAULT_ACTIVITY_PREFERENCES } from './core/activity-settings.js';
 
@@ -250,7 +251,7 @@ function renderDashboard(state) {
   document.getElementById('extension-dot').classList.toggle('on', enabled);
   setSafeIcon(activeServiceIcon, sourceIcon(track));
   presenceState.classList.toggle('active', active);
-  presenceState.innerHTML = `<i></i>${active ? 'Active' : enabled ? 'Waiting' : 'Paused'}`;
+  presenceState.replaceChildren(document.createElement('i'), active ? 'Active' : enabled ? 'Waiting' : 'Paused');
 
   if (title) {
     kickerEl.textContent = playing ? `Now playing · ${source}` : `Paused · ${source}`;

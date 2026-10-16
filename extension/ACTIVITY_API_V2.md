@@ -13,7 +13,8 @@ regular expressions, promises, and custom selection and formatting logic.
 
 The trusted extension loads a pinned, locally bundled QuickJS WebAssembly
 interpreter inside a dedicated extension worker for each live Activity document.
-An offscreen extension document owns those workers; a separate v2 `USER_SCRIPT`
+An extension host document owns those workers (Chromium offscreen document or
+Firefox background iframe); a separate v2 `USER_SCRIPT`
 world collects only approved page snapshots. Package JavaScript never enters
 the website's execution world. It executes inside the interpreter and has no browser `document`,
 `window`, `chrome`, `browser`, `navigator`, cookies, local/session storage,
@@ -39,10 +40,17 @@ Requests that exceed broker quotas are rejected.
 The parent additionally terminates a worker that fails to complete startup in
 five seconds or an update/promise resumption in two seconds, including native
 engine operations. At most 16 live v2 document sessions run per extension; idle
-workers expire after 120 seconds without snapshots. The shared offscreen document
-preserves the existing private Discord cleanup lifecycle. Workers never receive
-its Discord credentials. These safeguards are not an operating-system process
+workers expire after 120 seconds without snapshots. Chromium's shared offscreen
+document preserves its private Discord cleanup lifecycle. Firefox's event-page
+host has no unload cleanup: actual tab/document close events retain the shared
+keepalive deletion path. Workers never receive Discord credentials. These safeguards are not an operating-system process
 quota; selector evaluation and aggregate browser memory remain browser-managed.
+
+Supported desktop platforms are Chromium 135+ and Firefox 153+. Firefox's native
+`userScripts.execute` and message-sender `documentId` requirements are enforced by
+its minimum version; Activity API versions and package contracts are identical.
+Request Firefox's optional User Scripts permission from Activity Library before
+installing Activities. See the repository's Firefox README for setup and builds.
 
 ## Declare page reads
 

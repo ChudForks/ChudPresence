@@ -1,0 +1,62 @@
+name: Release both browsers from a deliberate version tag
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.21.0'
+          cache: npm
+      - name: Require the pushed tag to match every package manifest
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          const tag = process.env.RELEASE_TAG;
+          assert.match(tag, /^v\d+\.\d+\.\d+$/, 'Release tag must have the form vX.Y.Z');
+          for (const filename of ['package.json', 'extension/manifest.json', 'ChudPresence-Firefox/extension/manifest.json']) {
+            assert.equal(`v${JSON.parse(fs.readFileSync(filename, 'utf8')).version}`, tag, `Tag differs from ${filename}`);
+          }
+          NODE
+      - run: npm ci --ignore-scripts
+      - run: npm run check
+      - run: npm test
+      - run: npm run build:all
+      - run: npm run check:packages
+      - run: npm run lint:firefox
+      - name: Attach Chromium and unsigned Firefox packages to one release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          printf '%s\n' \
+            'Packages built from the tagged source using the committed dependency lockfile.' \
+            '' \
+            'The Firefox XPI is UNSIGNED DEVELOPMENT software for temporary loading through about:debugging. It is not an AMO-signed installation package.' \
+            'See ChudPresence-Firefox/README.md for the minimum Firefox version, manual testing, add-on identity, migration, and AMO signing/submission requirements.' > "$RUNNER_TEMP/release-notes.md"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/ChudPresence-*.zip dist/ChudPresence-Firefox-*-unsigned-development.xpi --clobber
+          else
+            gh release create "$RELEASE_TAG" dist/ChudPresence-*.zip dist/ChudPresence-Firefox-*-unsigned-development.xpi --verify-tag --title "ChudPresence $RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
+          fi

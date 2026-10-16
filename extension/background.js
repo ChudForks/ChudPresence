@@ -1,3 +1,5 @@
+import { browserApi, isFirefox } from './platform/browser-api.js';
+import { migratePlatformSettings } from './platform/migration.js';
 import { selectActivity } from './core/activity.js';
 import { ActivityRegistry } from './core/activity-registry.js';
 import { ActivityManager, sanitizeDiagnosticValue } from './core/activity-manager.js';
@@ -25,10 +27,36 @@ import { EXTENSION_NAME } from './core/branding.js';
 const activityRegistry = new ActivityRegistry();
 const navigationClears = new Map();
 const ACTIVITY_PRUNE_ALARM = 'activity-prune-stale';
+let activeTabId = null;
+let activityStateReady = !isFirefox;
+let activityReady = null;
+function ensureActivityReady() {
+  if (activityStateReady) return Promise.resolve();
+  if (!activityReady) {
+    activityReady = (async () => {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          await Promise.all([loadSettings(), activityManager.load()]);
+          activityStateReady = true;
+          return;
+        } catch (error) {
+          if (attempt === 2) throw error;
+        }
+      }
+    })().catch(error => { activityReady = null; throw error; });
+  }
+  return activityReady;
+}
 const activityManager = new ActivityManager({
+  sessionContext: {
+    registry: activityRegistry,
+    getActiveTab: () => activeTabId,
+    setActiveTab: (tabId) => { activeTabId = tabId; },
+  },
   onReport({ tabId, documentId, frameId, track }) {
     cancelNavigationClears(null, tabId, null, frameId);
     activityRegistry.update(tabId, documentId, track, frameId);
+    void activityManager.checkpointSession?.();
     schedulePublish();
   },
   onClear(activityId, tabId, documentId, frameId, { closing = false, navigationGraceMs = 0 } = {}) {
@@ -37,6 +65,7 @@ const activityManager = new ActivityManager({
     const known = activityRegistry.clearActivity(activityId, tabId, documentId, frameId);
     if (!known) return;
     if (typeof tabId === 'number') clearActiveTab(tabId);
+    void activityManager.checkpointSession?.();
     if (closing) publishCurrentActivity({ closing: true });
     else schedulePublish();
   },
@@ -51,7 +80,6 @@ function ensureDefaultYouTube() {
   }).finally(() => { defaultInstallPromise = null; });
   return defaultInstallPromise;
 }
-let activeTabId = null;
 let settings = { ...DEFAULT_SETTINGS };
 let delivery = presencePublisher.status();
 let pushTimer = 0;
@@ -62,6 +90,7 @@ registerActivityRestoreHandlers({
   manager: activityManager,
   afterInstallRestore: ensureDefaultYouTube,
   beforeInstallRestore: async () => {
+    await migratePlatformSettings(chrome);
     const stored = await chrome.storage.local.get(null);
     await chrome.storage.local.set(normalizeSettings(stored));
     await chrome.storage.local.remove([
@@ -76,6 +105,7 @@ registerActivityRestoreHandlers({
 });
 
 async function loadSettings() {
+  await migratePlatformSettings(chrome);
   settings = normalizeSettings(await chrome.storage.local.get(null));
   if (!settings.enabled) discardNavigationClears();
 }
@@ -158,7 +188,9 @@ function setAction(track) {
 }
 
 async function publishCurrentActivity({ closing = false, delayClear = false } = {}) {
+  if (!activityStateReady) await ensureActivityReady();
   const track = currentTrack();
+  void activityManager.checkpointSession?.();
   setAction(track);
   const intent = localPresenceIntent(track);
   if (!intent && delayClear && !closing) {
@@ -207,21 +239,33 @@ function pingRemaining() {
 }
 
 function onTabGone(tabId, { closing = false, retireDocuments = true, removed = false } = {}) {
+  if (!activityStateReady) {
+    void ensureActivityReady().then(() => onTabGone(tabId, { closing, retireDocuments, removed })).catch(() => {});
+    return;
+  }
   if (typeof tabId !== 'number') return;
   cancelNavigationClears(null, tabId);
-  activityManager.invalidateTab(tabId, { retireDocuments, removed }).catch(() => {});
+  // Capture ownership before invalidateTab synchronously invokes onClear.
+  // Otherwise that callback can consume the report and bypass immediate close.
   const known = activityRegistry.clearTab(tabId);
   clearActiveTab(tabId);
+  activityManager.invalidateTab(tabId, { retireDocuments, removed }).catch(() => {});
+  void activityManager.checkpointSession?.();
   if (!known) return;
   pingRemaining();
   publishCurrentActivity({ closing, delayClear: !closing });
 }
 
 function onDocumentGone(tabId, documentId, { closing = false, frameId = null } = {}) {
+  if (!activityStateReady) {
+    void ensureActivityReady().then(() => onDocumentGone(tabId, documentId, { closing, frameId })).catch(() => {});
+    return;
+  }
   if (typeof tabId !== 'number') return;
   const known = activityRegistry.clearDocument(tabId, documentId, frameId);
   if (!known) return;
   clearActiveTab(tabId);
+  void activityManager.checkpointSession?.();
   pingRemaining();
   publishCurrentActivity({ closing, delayClear: !closing });
 }
@@ -280,6 +324,11 @@ async function handleActivityLibraryMessage(message) {
 }
 
 function handleUserScriptMessage(message, sender, sendResponse) {
+  if (!activityStateReady) {
+    ensureActivityReady().then(() => handleUserScriptMessage(message, sender, sendResponse))
+      .catch(() => sendResponse({ ok: false, error: { code: 'runtime_error', message: 'Activity session restoration failed.' } }));
+    return true;
+  }
   activityManager.handleUserScriptMessage(message, sender)
     .then((result) => sendResponse(result))
     .catch((error) => sendResponse({
@@ -291,6 +340,10 @@ function handleUserScriptMessage(message, sender, sendResponse) {
 }
 
 function handleUserScriptConnect(port) {
+  if (!activityStateReady) {
+    void ensureActivityReady().then(() => handleUserScriptConnect(port)).catch(() => {});
+    return;
+  }
   void activityManager.handleUserScriptConnect(port);
 }
 
@@ -319,7 +372,12 @@ function registerUserScriptConnectListener() {
 registerUserScriptMessageListener();
 registerUserScriptConnectListener();
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+function handleRuntimeMessage(message, sender, sendResponse) {
+  if (!activityStateReady) {
+    ensureActivityReady().then(() => handleRuntimeMessage(message, sender, sendResponse))
+      .catch(() => sendResponse({ ok: false, error: 'Activity session restoration failed. Reload the extension to retry.' }));
+    return true;
+  }
   const privilegedDiscordMessage = [
     'GET_DISCORD_SETUP',
     'CONNECT_DISCORD',
@@ -426,7 +484,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   return false;
-});
+}
+chrome.runtime.onMessage.addListener(handleRuntimeMessage);
 
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== 'presence') return;
@@ -449,7 +508,11 @@ chrome.runtime.onConnect.addListener((port) => {
 
 chrome.tabs.onRemoved.addListener((tabId) => onTabGone(tabId, { closing: true, removed: true }));
 
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+function handleTabUpdated(tabId, changeInfo) {
+  if (!activityStateReady) {
+    void ensureActivityReady().then(() => handleTabUpdated(tabId, changeInfo)).catch(() => {});
+    return;
+  }
   // A loading update can accompany a player or route change in the same
   // document. Its report remains valid until that document ends or is replaced.
   if (shouldInvalidateActivityTab(changeInfo)) {
@@ -462,7 +525,8 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
     // transition that way while retaining the document that needs injection.
     activityManager.injectMatchingTab(tabId, changeInfo.url).catch(() => {});
   }
-});
+}
+chrome.tabs.onUpdated.addListener(handleTabUpdated);
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
@@ -471,16 +535,30 @@ chrome.storage.onChanged.addListener((changes, area) => {
   loadSettings().then(publishCurrentActivity);
 });
 
-chrome.alarms.onAlarm.addListener((alarm) => {
+function handleAlarm(alarm) {
+  if (!activityStateReady) {
+    void ensureActivityReady().then(() => handleAlarm(alarm)).catch(() => {});
+    return;
+  }
   if (alarm.name === ACTIVITY_PRUNE_ALARM) {
     activityManager.pruneStale().catch(() => {});
     return;
   }
   if (alarm.name !== 'discord-presence-renew') return;
+  if (isFirefox) {
+    // A renewal can be the first event after a long idle period. Apply the
+    // restored report timestamps before renewing a saved Discord intent.
+    activityManager.pruneStale().then(async (cleared) => {
+      if (cleared) await publishCurrentActivity();
+      else delivery = await presencePublisher.renew();
+    }).catch(() => {});
+    return;
+  }
   presencePublisher.renew().then((result) => {
     delivery = result;
   });
-});
+}
+chrome.alarms.onAlarm.addListener(handleAlarm);
 
 chrome.permissions?.onRemoved?.addListener(() => {
   activityManager.restoreAll().catch(() => {});
@@ -497,8 +575,12 @@ chrome.alarms.create(ACTIVITY_PRUNE_ALARM, { delayInMinutes: 0.5, periodInMinute
 // A service worker can start for a message without an onStartup event. Restore
 // independently of Discord initialization so a network/auth failure cannot
 // prevent installed Activities from resuming.
-loadSettings().catch(() => {});
-activityManager.restoreAll().then(ensureDefaultYouTube).catch(() => {});
+if (isFirefox) {
+  ensureActivityReady().then(() => activityManager.restoreAll()).then(ensureDefaultYouTube).catch(() => {});
+} else {
+  loadSettings().catch(() => {});
+  activityManager.restoreAll().then(ensureDefaultYouTube).catch(() => {});
+}
 presencePublisher.initialize().then(() => {
   delivery = presencePublisher.status();
 }).catch(() => {});

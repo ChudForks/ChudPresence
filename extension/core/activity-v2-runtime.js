@@ -2,6 +2,7 @@
 // to a dedicated extension worker; it never enters the website's JS world.
 export function runActivityV2(config) {
   'use strict';
+  const chrome = globalThis.browser || globalThis.chrome;
   const matches = (pattern, rawUrl) => {
     try {
       const url = new URL(rawUrl);

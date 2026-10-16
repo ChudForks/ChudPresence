@@ -4,6 +4,7 @@ import vm from 'node:vm';
 import test from 'node:test';
 
 const hostSource = (await fs.readFile(new URL('../extension/core/activity-v2-host.js', import.meta.url), 'utf8'))
+  .replace(/^import \{ browserApi \} from '[^']+';\r?\n/gm, '')
   .replaceAll('import.meta.url', JSON.stringify('chrome-extension://test/core/activity-v2-host.js'));
 const workerSource = (await fs.readFile(new URL('../extension/core/activity-v2-worker.js', import.meta.url), 'utf8'))
   .replace(/^import '\.\/activity-v2-engine\.generated\.js';\r?\n/m, '');

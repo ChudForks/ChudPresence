@@ -329,6 +329,7 @@ async function createPopupHarness({ activities = [], state = {}, rejectNext = nu
     __activitySettings: activitySettingsModule,
   });
   const executableSource = source
+    .replace(/^import \{ browserApi \} from '[^']+';\r?\n/gm, '')
     .replace("import { DEFAULT_SETTINGS, normalizeSettings } from './core/settings.js';", 'const { DEFAULT_SETTINGS, normalizeSettings } = __settings;')
     .replace("import { DEFAULT_ACTIVITY_PREFERENCES } from './core/activity-settings.js';", 'const { DEFAULT_ACTIVITY_PREFERENCES } = __activitySettings;');
   vm.runInContext(`${executableSource}\nglobalThis.__popupTest = { refresh, refreshInstalledActivities, showActivitySettings, renderDashboard };`, context);

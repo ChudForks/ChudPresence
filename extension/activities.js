@@ -1,6 +1,7 @@
 import { activityCatalogIconUrl, compareActivityVersions, downloadActivity, fetchCatalog, readCatalogCache } from './core/activity-repository.js';
 import { requestHostPermissions } from './core/activity-permissions.js';
 import { diagnosticEntryCount, formatDeveloperDiagnostics } from './core/developer-diagnostics.js';
+import { isFirefox, USER_SCRIPTS_REQUIRED, USER_SCRIPTS_UNAVAILABLE, configureUserScriptsDialog, openUserScriptsSettings } from './platform/browser-api.js';
 import {
   MAX_ACTIVITY_ICON_BYTES,
   validateActivityIcon,
@@ -629,7 +630,7 @@ async function refreshInstalled({ polling = false } = {}) {
   setHeaderStatus(
     nextPermissionStep || (state.userScriptsPermission
       ? `${installed.length} installed · Ready`
-      : 'Allow User Scripts in Chrome settings'),
+      : USER_SCRIPTS_REQUIRED),
     state.userScriptsPermission ? 'on' : 'error',
   );
   renderAll();
@@ -668,6 +669,15 @@ async function refreshCatalog() {
 }
 
 async function ensureActivityPermissions(matches, noticeElement = catalogNotice) {
+  if (isFirefox) {
+    // Both requests originate from the install/enable click before any download.
+    const granted = await api.permissions.request({ permissions: ['userScripts'], origins: matches });
+    if (!granted) throw new Error('Activity scripts or the requested website access was not granted.');
+    if (typeof api.userScripts?.execute !== 'function') throw new Error(USER_SCRIPTS_UNAVAILABLE);
+    userScriptsAvailable = true;
+    nextPermissionStep = '';
+    return true;
+  }
   if (!userScriptsAvailable || !api.userScripts?.execute) {
     const message = 'Activity scripts are unavailable. In Chrome 138 or newer, open this extension’s details and turn on Allow User Scripts, then reload this page.';
     if (noticeElement) setNotice(noticeElement, message, 'error');
@@ -830,6 +840,7 @@ async function loadLocalActivity() {
 }
 
 async function initialize() {
+  configureUserScriptsDialog(document);
   const tabs = [...document.querySelectorAll('.tab')];
   for (const button of tabs) {
     button.addEventListener('click', () => showView(button.dataset.view));
@@ -849,11 +860,16 @@ async function initialize() {
   document.getElementById('close-user-scripts-dialog').addEventListener('click', () => userScriptsDialog.close());
   document.getElementById('open-extension-details').addEventListener('click', async () => {
     try {
-      await api.tabs.create({ url: `chrome://extensions/?id=${encodeURIComponent(api.runtime.id)}` });
+      const granted = await openUserScriptsSettings(api);
+      if (isFirefox) {
+        if (!granted) throw new Error('Firefox did not grant the User Scripts permission.');
+        userScriptsDialog.close();
+        await refreshInstalled();
+      }
     } catch {
       setNotice(
         developerNotice,
-        'Chrome could not open extension settings automatically. Open chrome://extensions, choose this extension’s Details, and turn on Allow User Scripts.',
+        isFirefox ? USER_SCRIPTS_UNAVAILABLE : 'Chrome could not open extension settings automatically. Open chrome://extensions, choose this extension’s Details, and turn on Allow User Scripts.',
         'error',
       );
       userScriptsDialog.close();

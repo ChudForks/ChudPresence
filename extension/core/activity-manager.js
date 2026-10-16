@@ -20,6 +20,9 @@ import {
 import { compareActivityVersions, getActivityRepository } from './activity-repository.js';
 import { activityV2ScriptDefinition } from './activity-v2-runtime.js';
 import { ActivityV2HostClient } from './activity-v2-host-client.js';
+import { USER_SCRIPTS_UNAVAILABLE } from '../platform/browser-api.js';
+import { migratePlatformSettings, activityInstallDefaults, activityInstallCompleted } from '../platform/migration.js';
+import { restoreActivitySession, saveActivitySession } from '../platform/activity-session.js';
 
 const STORAGE_KEY = 'installedActivities';
 const SCRIPT_ID_PREFIX = 'chudpresence-activity-';
@@ -218,6 +221,7 @@ function scriptDefinition(record, extensionVersion = '0.0.0') {
   const code = [
     '(function __runActivityV1() {',
     "  'use strict';",
+    '  const chrome = globalThis.browser || globalThis.chrome;',
     // Imperative execute() targets frames directly and does not apply the
     // registered script's URL filters. Check them before starting any runtime.
     `  const __matchesUrl = ${safeMatch.toString()};`,
@@ -773,13 +777,15 @@ function safeMatch(pattern, rawUrl) {
 }
 
 export class ActivityManager {
-  constructor({ api = extensionApi(), onReport = () => {}, onClear = () => {}, fetchImpl = globalThis.fetch, v2Host } = {}) {
+  constructor({ api = extensionApi(), onReport = () => {}, onClear = () => {}, fetchImpl = globalThis.fetch, v2Host, sessionContext } = {}) {
     if (!api?.storage?.local) throw new Error('Extension storage API is required.');
     this.api = api;
     this.onReport = onReport;
     this.onClear = onClear;
     this.fetchImpl = fetchImpl;
     this.records = null;
+    this.loadPromise = null;
+    this.sessionContext = sessionContext;
     this.lastSeen = new Map();
     this.removedTabs = new Set();
     this.reportRates = new Map();
@@ -820,15 +826,30 @@ export class ActivityManager {
   }
 
   async load() {
+    if (this.loadPromise) return this.loadPromise;
     if (this.records) return this.records;
-    const result = await this.api.storage.local.get(STORAGE_KEY);
-    const value = result?.[STORAGE_KEY];
-    this.records = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-    return this.records;
+    this.loadPromise = (async () => {
+      await migratePlatformSettings(this.api);
+      const result = await this.api.storage.local.get(STORAGE_KEY);
+      const value = result?.[STORAGE_KEY];
+      this.records = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+      await restoreActivitySession(this);
+      return this.records;
+    })();
+    try { return await this.loadPromise; }
+    catch (error) { this.records = null; throw error; }
+    finally { this.loadPromise = null; }
+  }
+
+  checkpointSession() {
+    // Snapshot capture is synchronous; queued session writes must not hold up
+    // the immediate authenticated keepalive deletion on a real close event.
+    return saveActivitySession(this).catch(() => {});
   }
 
   async save() {
     await this.api.storage.local.set({ [STORAGE_KEY]: this.records || {} });
+    void this.checkpointSession();
   }
 
   async listInstalled() {
@@ -1149,10 +1170,10 @@ export class ActivityManager {
       throw new Error(`This Activity requires ChudPresence v${record.metadata.minExtensionVersion} or newer.`);
     }
     if (typeof this.api.userScripts?.execute !== 'function') {
-      throw new Error('Chrome does not expose the required userScripts.execute API. Use Chrome 135 or newer; on Chrome 138 or newer, enable Allow User Scripts on the extension details page.');
+      throw new Error(USER_SCRIPTS_UNAVAILABLE);
     }
     if (!await hasUserScriptsPermission(this.api)) {
-      throw new Error('The userScripts permission is unavailable. Reload the extension and enable Allow User Scripts in Chrome extension details.');
+      throw new Error(USER_SCRIPTS_UNAVAILABLE);
     }
     if (!await hasHostPermissions([...record.metadata.matches, ...(record.metadata.network || [])], this.api)) {
       throw new Error('Grant every website and network permission requested by this Activity first.');
@@ -1223,16 +1244,17 @@ export class ActivityManager {
     }
     const records = await this.load();
     const previous = records[metadata.id];
+    const defaults = previous ? {} : await activityInstallDefaults(metadata.id, this.api);
     const now = Date.now();
     const record = {
       metadata,
       code,
       capability: createActivityCapability(),
-      enabled: true,
+      enabled: defaults.enabled !== false,
       installedAt: previous?.installedAt || now,
       updatedAt: now,
       source,
-      preferences: normalizeActivityPreferences(previous?.preferences),
+      preferences: normalizeActivityPreferences(previous?.preferences || defaults.preferences),
       settingValues: normalizeActivitySettings(metadata.settings || [], previous?.settingValues),
       ...(previous && (previous.pendingUpgrade || previous.metadata.version !== metadata.version)
         ? (() => {
@@ -1247,7 +1269,7 @@ export class ActivityManager {
 
     if (previous) await this.notifyActivityTeardown(metadata.id, 'updated');
     try {
-      await this.register(record);
+      if (record.enabled) await this.register(record);
     } catch (error) {
       if (previous) {
         await this.register(previous).catch(() => {});
@@ -1269,6 +1291,7 @@ export class ActivityManager {
       }
       throw error;
     }
+    await activityInstallCompleted(metadata.id, this.api);
     if (previous) {
       await this.reloadInternal(metadata.id).catch((error) => {
         this.recordActivityError(metadata.id, null, 'reload_failed', error.message || 'Activity update reload failed.');
@@ -2258,6 +2281,7 @@ export class ActivityManager {
       frames.delete(frameId);
       if (!frames.size) tabs.delete(tabId);
       if (!tabs.size) this.lastSeen.delete(id);
+      void this.checkpointSession();
       if (structured && message.payload?.closing === true) {
         const navigationUrl = message.payload?.navigationUrl;
         const navigationGraceMs = frameId === 0 &&
@@ -2373,6 +2397,7 @@ export class ActivityManager {
       tabId,
       track: presenceTrack,
     });
+    void this.checkpointSession();
     return respond(true, { accepted: true });
   }
 
@@ -2489,6 +2514,7 @@ export class ActivityManager {
     await Promise.all(callbacks.map(([id, documentId, frameId]) =>
       this.onClear(id, tabId, documentId, frameId),
     ));
+    void this.checkpointSession();
     return invalidated;
   }
 
@@ -2509,6 +2535,7 @@ export class ActivityManager {
     for (const [key, rate] of this.reportRates) {
       if (now - rate.startedAt > REPORT_WINDOW_MS * 2) this.reportRates.delete(key);
     }
+    void this.checkpointSession();
     return cleared;
   }
 
