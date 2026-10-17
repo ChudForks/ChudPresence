@@ -60,6 +60,18 @@ test('Firefox restores report selection and document ownership once without refr
   assert.equal(resumed.registry.has(9), false, 'later loads must not revive a cleared owner');
 });
 
+test('Firefox suspension preserves a report focus policy without turning it into background playback', async () => {
+  const original = harness();
+  remember(original);
+  const context = original.manager.lastSeen.get('youtube').get(9).get(0);
+  context.track.focusPolicy = 'foreground';
+  await saveActivitySession(original.manager);
+  const resumed = harness({ data: original.data });
+  await restoreActivitySession(resumed.manager);
+  assert.equal(resumed.registry.tracks().get(9).focusPolicy, 'foreground');
+  assert.equal(resumed.manager.lastSeen.get('youtube').get(9).get(0).track.focusPolicy, 'foreground');
+});
+
 test('Firefox rejects stale Activity versions/capabilities and disabled or removed owners', async () => {
   const original = harness();
   remember(original);

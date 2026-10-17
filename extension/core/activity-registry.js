@@ -91,7 +91,7 @@ export class ActivityRegistry {
     const tracks = new Map();
     for (const [tabId, frames] of this.entries) {
       const latest = [...frames.values()]
-        .filter((entry) => isEligible(entry.track))
+        .filter((entry) => isEligible(entry.track, tabId))
         .sort((left, right) => right.sequence - left.sequence);
       const reportable = latest.filter((entry) => isReportable(entry.track));
       const current = reportable.find((entry) => isPlaying(entry.track)) || reportable[0] || latest[0];

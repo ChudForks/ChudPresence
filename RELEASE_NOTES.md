@@ -1,3 +1,14 @@
+# ChudPresence 2.0.5 (unreleased)
+
+- V1/V2 reports can select `focusPolicy: 'foreground'` for browsing presence.
+  Selected-tab and browser-window focus control publication, allowing toolbar
+  popups and address-bar use without relying on webpage focus.
+- Tab switches and browser focus loss immediately suppress foreground reports;
+  returning restores valid reports. Explicit clears, closure, stale reports and
+  existing background playback behavior remain supported.
+- Updated local Anikoto, Google and Instagram packages opt browsing reports in.
+  These packages require extension 2.0.5 and must be installed/updated separately.
+
 # ChudPresence 2.0.4
 
 Stable promotion: October 15, 2026. Release tag: `v2.0.4`.

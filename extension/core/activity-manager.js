@@ -695,6 +695,17 @@ function scriptDefinition(record, extensionVersion = '0.0.0') {
     '    return proxy;',
     '  };',
     '  const __activityWindow = __safeGlobal(window);',
+    '  const __sendPageFocus = () => {',
+    '    try { __runtimePort?.postMessage?.({ type: "CHUDPRESENCE_PAGE_FOCUS", focused: document.hasFocus() && document.visibilityState === "visible" }); } catch {}',
+    '  };',
+    '  window.addEventListener("focus", __sendPageFocus);',
+    '  window.addEventListener("blur", __sendPageFocus);',
+    '  document.addEventListener("visibilitychange", __sendPageFocus);',
+    '  __lifecycle.onCleanup(() => {',
+    '    window.removeEventListener("focus", __sendPageFocus);',
+    '    window.removeEventListener("blur", __sendPageFocus);',
+    '    document.removeEventListener("visibilitychange", __sendPageFocus);',
+    '  });',
     '  const __runActivity = (ChudPresence, browser, chrome, globalThis, window, self, top) => {',
     record.code,
     '  };',
@@ -704,6 +715,7 @@ function scriptDefinition(record, extensionVersion = '0.0.0') {
     '    try {',
     '      const port = chrome.runtime.connect({ name: `chudpresence-activity-v1:${__activityIdentity.activityId}:${__activityIdentity.activityVersion}:${__activityIdentity.capability}` });',
     '      __runtimePort = port;',
+    '      __sendPageFocus();',
     '      port.onMessage.addListener((message) => {',
     '        if (__matchesActivity(message)) __endLifecycle(message.reason || "activity-stopped");',
     '        else if (message?.type === "CHUDPRESENCE_ACTIVITY_UPGRADE") void __onUpgradeMessage(message);',
@@ -777,10 +789,11 @@ function safeMatch(pattern, rawUrl) {
 }
 
 export class ActivityManager {
-  constructor({ api = extensionApi(), onReport = () => {}, onClear = () => {}, fetchImpl = globalThis.fetch, v2Host, sessionContext } = {}) {
+  constructor({ api = extensionApi(), onReport = () => {}, onClear = () => {}, onAttention = () => {}, fetchImpl = globalThis.fetch, v2Host, sessionContext } = {}) {
     if (!api?.storage?.local) throw new Error('Extension storage API is required.');
     this.api = api;
     this.onReport = onReport;
+    this.onAttention = onAttention;
     this.onClear = onClear;
     this.fetchImpl = fetchImpl;
     this.records = null;
@@ -1136,6 +1149,11 @@ export class ActivityManager {
       senderUrl: sender.url || '',
     });
     port.onDisconnect?.addListener?.(() => this.disconnectActivityPort(id, port));
+    port.onMessage?.addListener?.(message => {
+      if (sender.frameId !== 0 || !ports.has(port) ||
+          message?.type !== 'CHUDPRESENCE_PAGE_FOCUS' || typeof message.focused !== 'boolean') return;
+      this.onAttention({ tabId: sender.tab.id, documentId: sender.documentId, focused: message.focused });
+    });
     if (record.pendingUpgrade) await this.notifyPendingUpgrade(id, record, port, sender);
     return true;
   }
@@ -1143,6 +1161,7 @@ export class ActivityManager {
   disconnectActivityPort(id, port) {
     const ports = this.activityPorts.get(id);
     const context = ports?.get(port);
+    if (context?.frameId === 0) this.onAttention({ tabId: context.tabId, documentId: context.documentId, focused: null });
     if (context) this.v2Host.stopContext(id, context.tabId, context.documentId);
     if (ports) {
       ports.delete(port);

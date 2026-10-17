@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ChudPresence",
-  "version": "2.0.4",
+  "version": "2.0.5",
   "description": "Share your browsing and playback activity on Discord with customizable Activities.",
   "minimum_chrome_version": "135",
   "content_security_policy": {

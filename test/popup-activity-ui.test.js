@@ -288,6 +288,7 @@ async function createPopupHarness({ activities = [], state = {}, rejectNext = nu
   let rejection = rejectNext;
   const chrome = {
     runtime: {
+      connect() { return { postMessage() {} }; },
       async sendMessage(message) {
         calls.push(structuredClone(message));
         if (message.type === 'GET_STATE') return structuredClone({ ...dashboard, settings: dashboard.settings });
@@ -311,6 +312,7 @@ async function createPopupHarness({ activities = [], state = {}, rejectNext = nu
         return { ok: false, error: `Unexpected message: ${message.type}` };
       },
     },
+    windows: { async getCurrent() { return { id: 1 }; } },
     storage: {
       local: {
         async set(values) { storageWrites.push(structuredClone(values)); dashboard.settings = { ...dashboard.settings, ...values }; },
@@ -319,6 +321,7 @@ async function createPopupHarness({ activities = [], state = {}, rejectNext = nu
   };
   const context = vm.createContext({
     document: dom.document,
+    window: { addEventListener() {} },
     chrome,
     location: { hash: '' },
     setInterval() { return 0; },

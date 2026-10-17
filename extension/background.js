@@ -2,6 +2,7 @@ import { browserApi, isFirefox } from './platform/browser-api.js';
 import { migratePlatformSettings } from './platform/migration.js';
 import { selectActivity } from './core/activity.js';
 import { ActivityRegistry } from './core/activity-registry.js';
+import { createForegroundTracker } from './core/foreground.js';
 import { ActivityManager, sanitizeDiagnosticValue } from './core/activity-manager.js';
 import { registerActivityRestoreHandlers } from './core/activity-restore.js';
 import {
@@ -53,6 +54,9 @@ const activityManager = new ActivityManager({
     getActiveTab: () => activeTabId,
     setActiveTab: (tabId) => { activeTabId = tabId; },
   },
+  onAttention({ tabId, documentId, focused }) {
+    foreground.setPageFocus(tabId, documentId, focused);
+  },
   onReport({ tabId, documentId, frameId, track }) {
     cancelNavigationClears(null, tabId, null, frameId);
     activityRegistry.update(tabId, documentId, track, frameId);
@@ -84,6 +88,23 @@ let settings = { ...DEFAULT_SETTINGS };
 let delivery = presencePublisher.status();
 let pushTimer = 0;
 const transientClear = createPresenceClearDelay(() => publishCurrentActivity());
+function hasForegroundReports() {
+  return [...activityRegistry.entries.values()].some(frames =>
+    [...frames.values()].some(entry => entry.track?.focusPolicy === 'foreground'));
+}
+const foreground = createForegroundTracker({
+  api: chrome,
+  documentForTab: tabId => activityRegistry.entries.get(tabId)?.get(0)?.documentId,
+  onChange() {
+    // Reevaluate retained foreground reports immediately, bypassing playback's
+    // debounce/clear grace. Do not discard them just because focus moved.
+    if (!activityStateReady) {
+      void ensureActivityReady().then(() => {
+        if (hasForegroundReports()) void publishCurrentActivity();
+      }).catch(() => {});
+    } else if (hasForegroundReports()) void publishCurrentActivity();
+  },
+});
 
 registerActivityRestoreHandlers({
   runtime: chrome.runtime,
@@ -144,7 +165,7 @@ function deferNavigationClear(activityId, tabId, documentId, frameId, graceMs) {
 }
 
 function currentTrack() {
-  const eligible = activityRegistry.tracks((track) => isTrackAllowed(
+  const eligible = activityRegistry.tracks((track, tabId) => foreground.allows(tabId, track) && isTrackAllowed(
     track,
     settings,
     track?.activityId ? activityManager.preferencesFor(track.activityId) : null,
@@ -488,6 +509,16 @@ function handleRuntimeMessage(message, sender, sendResponse) {
 chrome.runtime.onMessage.addListener(handleRuntimeMessage);
 
 chrome.runtime.onConnect.addListener((port) => {
+  if (port.name === 'foreground-popup') {
+    if (port.sender?.url !== chrome.runtime.getURL('popup.html') || port.sender?.tab) return;
+    port.onMessage.addListener(message => {
+      if (Number.isInteger(message?.windowId) && message.windowId >= 0 && typeof message.focused === 'boolean') {
+        foreground.setPopupFocus(port, message.windowId, message.focused);
+      }
+    });
+    port.onDisconnect.addListener(() => foreground.setPopupFocus(port, null, null));
+    return;
+  }
   if (port.name !== 'presence') return;
   const tabId = port.sender?.tab?.id;
   const documentId = port.sender?.documentId;
@@ -549,9 +580,13 @@ function handleAlarm(alarm) {
     // A renewal can be the first event after a long idle period. Apply the
     // restored report timestamps before renewing a saved Discord intent.
     activityManager.pruneStale().then(async (cleared) => {
-      if (cleared) await publishCurrentActivity();
+      if (cleared || hasForegroundReports()) await publishCurrentActivity();
       else delivery = await presencePublisher.renew();
     }).catch(() => {});
+    return;
+  }
+  if (hasForegroundReports()) {
+    void publishCurrentActivity();
     return;
   }
   presencePublisher.renew().then((result) => {

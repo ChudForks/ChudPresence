@@ -17,7 +17,7 @@ function event() {
     dispatch(...args) { return [...listeners].map(listener => listener(...args)); } };
 }
 
-async function wakeHarness(t, { secondTab = false, ageMs = 0, snapshotFailures = 0 } = {}) {
+async function wakeHarness(t, { secondTab = false, ageMs = 0, snapshotFailures = 0, foreground = false } = {}) {
   const tempRoot = path.resolve(os.tmpdir());
   const scratch = await fs.mkdtemp(path.join(tempRoot, 'chudpresence-firefox-wake-'));
   const originals = Object.fromEntries(['browser', 'chrome', 'fetch'].map(key => [key, globalThis[key]]));
@@ -74,8 +74,9 @@ async function wakeHarness(t, { secondTab = false, ageMs = 0, snapshotFailures =
     },
     storage: { local: area(local), session: area(session, true), onChanged: event() },
     permissions: { async contains() { return true; }, onAdded: event(), onRemoved: event() },
-    tabs: { onRemoved: event(), onUpdated: event(), async query() { return []; },
+    tabs: { onRemoved: event(), onUpdated: event(), onActivated: event(), onDetached: event(), onAttached: event(), onReplaced: event(), async query() { return []; },
       async get() { return { id: 9, url: sender.url }; }, async sendMessage() {} },
+    windows: { onFocusChanged: event(), onRemoved: event(), async getAll() { return []; } },
     alarms: { async create() {}, onAlarm: event() }, action: { setTitle() {} },
     userScripts: { async getScripts() { return []; }, async configureWorld() {},
       async register() {}, async update() {}, async unregister() {}, async execute() { return []; } },
@@ -87,14 +88,14 @@ async function wakeHarness(t, { secondTab = false, ageMs = 0, snapshotFailures =
     return { ok: true, status: 204, headers: new Headers(), async json() { return {}; } };
   };
   const files = ['platform/browser-api.js', 'platform/migration.js', 'platform/activity-session.js',
-    'core/activity.js', 'core/activity-registry.js', 'core/activity-manager.js', 'core/activity-restore.js',
+    'core/activity.js', 'core/activity-registry.js', 'core/foreground.js', 'core/activity-manager.js', 'core/activity-restore.js',
     'core/default-activity.js', 'core/tab-lifecycle.js', 'core/presence.js', 'core/presence-clear-delay.js',
     'core/settings.js', 'platform/presence-publisher.js', 'core/branding.js', 'core/activity-validator.js', 'config.js'];
   const bindings = Object.assign({}, ...await Promise.all(files.map(file => import(pathToFileURL(path.join(staged, file))))));
   local.discordAuthClientId = bindings.DISCORD_CLIENT_ID;
   local.discordAuth = { accessToken: 'private-discord-access', refreshToken: 'private-discord-refresh', expiresAt: Date.now() + 3600000 };
   const track = { ...bindings.normalizeActivityReport({ kind: 'song', media: { title: 'Restored song', artist: 'Artist' },
-    playback: { state: 'playing' } }, 1), source: 'activity', activityId: 'music', activityVersion: '1.0.0', activityName: 'Music' };
+    playback: { state: 'playing' }, ...(foreground ? { focusPolicy: 'foreground' } : {}) }, 1), source: 'activity', activityId: 'music', activityVersion: '1.0.0', activityName: 'Music' };
   const registry = new bindings.ActivityRegistry();
   registry.update(9, sender.documentId, track, 0);
   const fallback = { ...track, media: { ...track.media, title: 'Second song' },
@@ -159,6 +160,15 @@ test('a tab removal that wakes Firefox restores report ownership before clearing
   assertKeepaliveDeletion(harness);
   assert.equal(harness.wake.activityRegistry.has(9), false);
   assert.equal(harness.wake.activityManager.removedTabs.has(9), true);
+});
+
+test('a Firefox cold wake suppresses a retained foreground report when no browser window has focus', async (t) => {
+  const harness = await wakeHarness(t, { foreground: true });
+  await harness.ready();
+  assert.equal(harness.wake.activityRegistry.has(9), true, 'suppression must retain report ownership');
+  assert.equal(harness.wake.currentTrack(), null);
+  const deletions = harness.requests.filter(request => request.url.endsWith('/headless-sessions/delete'));
+  assert.equal(deletions.length, 1);
 });
 
 test('a document closing message that wakes Firefox recognizes its restored owner and clears immediately', async (t) => {

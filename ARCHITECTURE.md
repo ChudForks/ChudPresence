@@ -59,6 +59,21 @@ Install, enable, reload, and restore also inject into already-open matching tabs
 
 ## Reports, selection, and clearing
 
+V1/V2 reports can opt into `focusPolicy: 'foreground'` (2.0.5+). The shared
+foreground tracker reads selected tab IDs and focused window flags, distinct
+from the selected presence source (`activeTabId`). It filters each frame before
+registry aggregation, retains suppressed reports, and recomputes publication
+immediately on tab/window focus changes without playback clear grace. Browser
+UI can blur the document without changing eligibility. Startup/wake and tab
+movement reconcile browser state; stale async snapshots cannot undo newer
+events. Authenticated top-document ports provide native focus as a positive
+fallback for browsers that report `WINDOW_ID_NONE` for toolbar UI. A URL-checked
+popup port independently reports ChudPresence popup focus and its owner window.
+Blur/hidden/disconnect revokes those signals; no guest browser capability is
+added. Unknown focus suppresses foreground reports. Omitted/`background`
+policies keep existing behavior. Explicit clears and ownership/freshness
+invalidation still remove reports; Firefox checkpoints preserve the policy.
+
 Reports remain associated with their Activity, tab, frame, and document. A `status: loading` update alone retains the report and document: player and SPA transitions can occur without replacing the page. A new document ID retires the old document, and a replacement top document retires its child frames. Discarded and closed tabs are invalidated. Late clears or reports from retired documents cannot erase a newer report.
 
 `extension/core/activity-registry.js` stores reports per frame and selects the most recently updated surviving frame for each tab. `extension/core/activity.js` prefers playing media over paused media, retaining the selected tab while eligible. Global sharing and each Activity's paused preference filter candidates. `extension/core/presence.js` converts the selected normal-visibility report into a transport-neutral intent using generic media semantics and per-Activity presentation preferences. It includes optional clickable details, state, and artwork URLs; paused reports have no playback timestamps.

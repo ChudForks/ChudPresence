@@ -57,6 +57,7 @@ assert.deepEqual(runtimeContract.REPORT_PLAYBACK_FIELDS, Object.keys(report.prop
 assert.deepEqual(runtimeContract.REPORT_DISPLAY_FIELDS, Object.keys(report.properties.display.properties));
 assert.deepEqual(runtimeContract.REPORT_ARTWORK_FIELDS, Object.keys(report.properties.artwork.properties));
 assert.deepEqual(runtimeContract.REPORT_VISIBILITY_VALUES, report.properties.visibility.enum);
+assert.deepEqual(runtimeContract.REPORT_FOCUS_POLICY_VALUES, report.properties.focusPolicy.enum);
 assert.deepEqual(runtimeContract.REPORT_PLAYBACK_STATE_VALUES, report.properties.playback.properties.state.enum);
 assert.deepEqual(runtimeContract.REPORT_STATUS_DISPLAY_VALUES, report.properties.display.properties.statusDisplay.enum);
 assert.equal(runtimeContract.MAX_ACTIVITY_METADATA_BYTES, apiContract.limits.metadataBytes);

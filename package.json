@@ -1,6 +1,6 @@
 {
   "name": "chudpresence",
-  "version": "2.0.4",
+  "version": "2.0.5",
   "private": true,
   "type": "module",
   "description": "Share your browsing and playback activity on Discord with customizable Activities.",
@@ -8,6 +8,7 @@
     "check": "node scripts/check.mjs && node scripts/build-v2-engine.mjs --check",
     "test": "node --test test/*.test.js",
     "test:v2-browser": "node scripts/test-v2-browser.mjs",
+    "test:foreground-browser": "node scripts/test-foreground-browser.mjs",
     "build": "node scripts/build.mjs",
     "build:chromium": "node scripts/build.mjs chromium",
     "build:firefox": "node scripts/build.mjs firefox",

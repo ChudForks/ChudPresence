@@ -6,7 +6,7 @@ const MAX_CONTEXTS = 2048;
 const MAX_ACTIVITIES = 256;
 const MAX_SNAPSHOT_BYTES = 4 * 1024 * 1024;
 const MAX_TRACK_BYTES = 20 * 1024;
-const REPORT_FIELDS = ['kind', 'media', 'playback', 'display', 'artwork', 'buttons', 'visibility'];
+const REPORT_FIELDS = ['kind', 'media', 'playback', 'display', 'artwork', 'buttons', 'visibility', 'focusPolicy'];
 const states = new WeakMap();
 
 function stateFor(manager) {

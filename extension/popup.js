@@ -2,6 +2,18 @@ import { browserApi } from './platform/browser-api.js';
 import { DEFAULT_SETTINGS, normalizeSettings } from './core/settings.js';
 import { DEFAULT_ACTIVITY_PREFERENCES } from './core/activity-settings.js';
 
+// Toolbar popups can be outside the browser's windows focus model. This port
+// reports only this trusted popup's native focus and its owning browser window.
+const foregroundPort = chrome.runtime.connect({ name: 'foreground-popup' });
+let foregroundWindowId = null;
+function reportPopupFocus() {
+  if (foregroundWindowId === null) return;
+  try { foregroundPort.postMessage({ windowId: foregroundWindowId, focused: document.hasFocus() }); } catch {}
+}
+chrome.windows.getCurrent().then(window => { foregroundWindowId = window.id; reportPopupFocus(); }).catch(() => {});
+window.addEventListener('focus', reportPopupFocus);
+window.addEventListener('blur', reportPopupFocus);
+
 const activityView = document.getElementById('activity-view');
 const settingsView = document.getElementById('settings-view');
 const activityTab = document.getElementById('activity-tab');

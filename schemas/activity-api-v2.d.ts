@@ -50,6 +50,8 @@ export interface ActivityReport {
   artwork?: { large?: string; largeUrl?: string; small?: string; largeText?: string; smallText?: string };
   buttons?: { label: string; url: string }[];
   visibility?: 'normal' | 'idle' | 'private' | 'ad';
+  /** Only publish in the selected tab of the focused browser window (2.0.5+). Omission preserves background behavior. */
+  focusPolicy?: 'foreground' | 'background';
 }
 export interface NetworkOptions {
   method?: 'GET' | 'POST'; headers?: Record<string, string>; body?: string; json?: Json;

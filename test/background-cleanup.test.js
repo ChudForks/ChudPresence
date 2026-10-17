@@ -4,6 +4,7 @@ import test from 'node:test';
 import vm from 'node:vm';
 import { selectActivity } from '../extension/core/activity.js';
 import { ActivityRegistry } from '../extension/core/activity-registry.js';
+import { createForegroundTracker } from '../extension/core/foreground.js';
 import { createPresenceIntent } from '../extension/core/presence.js';
 import { createPresenceClearDelay } from '../extension/core/presence-clear-delay.js';
 import * as settings from '../extension/core/settings.js';
@@ -26,16 +27,19 @@ async function createBackgroundHarness(activityPreferences = {}) {
   const cancel = (id) => timers.delete(id);
   const event = () => ({ listeners: [], addListener(listener) { this.listeners.push(listener); }, hasListener: () => false });
   const removed = event();
+  const windows = [{ id: 1, focused: true, tabs: [{ id: 9, active: true }] }];
   const chrome = {
     runtime: { onMessage: event(), onConnect: event(), onUserScriptMessage: event(), onUserScriptConnect: event(), getURL: (path = '') => `chrome-extension://test/${path}` },
-    tabs: { onRemoved: removed, onUpdated: event(), sendMessage: async () => {}, get: async () => ({}) },
+    tabs: { onRemoved: removed, onUpdated: event(), onActivated: event(), onDetached: event(),
+      onAttached: event(), onReplaced: event(), sendMessage: async () => {}, get: async () => ({}) },
+    windows: { onFocusChanged: event(), onRemoved: event(), getAll: async () => structuredClone(windows) },
     storage: { local: { get: async () => ({}), set: async () => {}, remove: async () => {} }, onChanged: event() },
     alarms: { create: async () => {}, onAlarm: event() },
     action: { setTitle() {} },
   };
   vm.runInNewContext(source, {
     ...settings,
-    chrome, isFirefox: false, selectActivity, ActivityRegistry, createPresenceIntent, migratePlatformSettings,
+    chrome, isFirefox: false, selectActivity, ActivityRegistry, createForegroundTracker, createPresenceIntent, migratePlatformSettings,
     ActivityManager: class {
       constructor(callbacks) { managerCallbacks = callbacks; }
       restoreAll() { return Promise.resolve(); }
@@ -69,7 +73,19 @@ async function createBackgroundHarness(activityPreferences = {}) {
     callbacks: managerCallbacks, timers, publications, diagnosticClears,
     sendMessage: (message, url = 'chrome-extension://test/activities.html') => new Promise((resolve) =>
       chrome.runtime.onMessage.listeners[0](message, { url }, resolve)),
-    removeTab: (tabId) => removed.listeners[0](tabId),
+    removeTab: (tabId) => {
+      for (const window of windows) window.tabs = window.tabs.filter(tab => tab.id !== tabId);
+      for (const listener of removed.listeners) listener(tabId);
+    },
+    activate(tabId, windowId = 1) {
+      const window = windows.find(window => window.id === windowId);
+      window.tabs = [{ id: tabId, active: true }];
+      for (const listener of chrome.tabs.onActivated.listeners) listener({ tabId, windowId });
+    },
+    focus(windowId) {
+      for (const window of windows) window.focused = window.id === windowId;
+      for (const listener of chrome.windows.onFocusChanged.listeners) listener(windowId);
+    },
     runTimer(delay) {
       const [id, timer] = [...timers].find(([, entry]) => entry.delay === delay);
       timers.delete(id);
@@ -90,6 +106,48 @@ test('document-exit clear publishes immediately before tab removal can forget th
   assert.equal(harness.publications[0].options.closing, true);
   harness.removeTab(9);
   assert.equal(harness.publications.length, 1);
+});
+
+test('foreground browsing suppresses immediately on tab/window exit and restores without another report', async () => {
+  const harness = await createBackgroundHarness();
+  const report = { tabId: 9, documentId: 'browsing', frameId: 0,
+    track: { activityId: 'mixed', kind: 'generic', media: { title: 'Browsing' },
+      playback: { state: 'playing' }, display: { details: 'Browsing' }, artwork: {}, visibility: 'normal', focusPolicy: 'foreground' } };
+  harness.callbacks.onReport(report);
+  harness.runTimer(250);
+  assert.equal(harness.publications.at(-1).intent.details, 'Browsing');
+  harness.activate(10);
+  assert.equal(harness.publications.at(-1).intent, null);
+  assert.equal([...harness.timers.values()].some(timer => timer.delay === 1500), false);
+  harness.activate(9);
+  assert.equal(harness.publications.at(-1).intent.details, 'Browsing');
+  harness.focus(-1);
+  assert.equal(harness.publications.at(-1).intent, null);
+  harness.focus(1);
+  assert.equal(harness.publications.at(-1).intent.details, 'Browsing');
+  harness.callbacks.onClear('mixed', 9, 'browsing', 0, { closing: true });
+  harness.activate(10);
+  harness.activate(9);
+  assert.equal(harness.publications.at(-1).intent, null, 'focus must not revive an explicitly cleared report');
+});
+
+test('foreground filtering precedes frame selection and preserves background playback in the same Activity', async () => {
+  const harness = await createBackgroundHarness();
+  harness.callbacks.onReport({ tabId: 9, documentId: 'player', frameId: 1,
+    track: { activityId: 'mixed', title: 'Background playback', playing: true } });
+  harness.callbacks.onReport({ tabId: 9, documentId: 'page', frameId: 0,
+    track: { activityId: 'mixed', title: 'Browsing', playing: true, focusPolicy: 'foreground' } });
+  harness.runTimer(250);
+  assert.equal(harness.publications.at(-1).intent.details, 'Browsing');
+  harness.focus(-1);
+  assert.equal(harness.publications.at(-1).intent.details, 'Background playback');
+  harness.focus(1);
+  assert.equal(harness.publications.at(-1).intent.details, 'Browsing');
+  harness.removeTab(9);
+  assert.equal(harness.publications.at(-1).intent, null);
+  assert.equal(harness.publications.at(-1).options.closing, true);
+  harness.activate(9);
+  assert.equal(harness.publications.at(-1).intent, null);
 });
 
 test('same-Activity navigation holds the report and replaces it without publishing an empty presence', async () => {

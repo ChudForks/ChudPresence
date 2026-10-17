@@ -17,10 +17,10 @@ npm run lint:firefox
 
 `npm run build` and `build.bat` retain the Chromium default. Explicit targets are `npm run build:chromium`, `npm run build:firefox`, and `npm run build:all`. Builds use the working tree, including edits, rather than exporting HEAD. Each target replaces only its own current-version outputs.
 
-For version 2.0.4 the outputs are:
+For version 2.0.5 the outputs are:
 
-- `dist/ChudPresence-2.0.4/` and `dist/ChudPresence-2.0.4.zip` for Chromium.
-- `dist/ChudPresence-Firefox-2.0.4-unsigned-development/` and `dist/ChudPresence-Firefox-2.0.4-unsigned-development.xpi` for Firefox.
+- `dist/ChudPresence-2.0.5/` and `dist/ChudPresence-2.0.5.zip` for Chromium.
+- `dist/ChudPresence-Firefox-2.0.5-unsigned-development/` and `dist/ChudPresence-Firefox-2.0.5-unsigned-development.xpi` for Firefox.
 
 Use **desktop Firefox 153.0 or newer**. Open `about:debugging#/runtime/this-firefox`, choose **Load Temporary Add-on**, and select the assembled Firefox folder's `manifest.json` (or the unsigned XPI). Temporary add-ons are removed on browser restart; ordinary permanent installation requires an AMO-signed XPI. The source overlay is intentionally incomplete without the shared files.
 
@@ -78,6 +78,12 @@ The pinned Mozilla `addons-linter` 10.14.0 runs with warnings treated as failure
 `.github/workflows/release.yml` runs only when a deliberately pushed `vX.Y.Z` tag exactly matches `package.json` and both manifests. It runs the same gates and attaches the Chromium ZIP and clearly labeled unsigned Firefox XPI to the **same GitHub Release**. There is no release on ordinary branch pushes. For a future version, update all three version fields, run the checks, commit, and deliberately create/push that version tag when ready. Do not reuse an existing version tag. No push, release publication, signing or AMO submission was performed during this port.
 
 ## Manual test checklist
+
+- With a `focusPolicy: 'foreground'` browsing report, open ChudPresence's popup,
+  another extension's popup and the address bar. Switch tabs/windows and leave
+  Firefox, then return. Check immediate suppression/restoration, popup blur and
+  closure, and retained background playback. Both native window and native page
+  focus being unavailable for a third-party popup must fail closed.
 
 - Temporarily load the assembled Firefox manifest on 153+, open popup/Activity Library, and check Firefox's extension console for errors.
 - Grant/deny User Scripts, catalog and site permissions; install official V1 and V2 packages. Verify preview and all settings, then revoke/regrant access and reload Activities on already-open tabs.

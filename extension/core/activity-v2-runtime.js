@@ -67,6 +67,9 @@ export function runActivityV2(config) {
     clearInterval(timer);
     clearTimeout(reconnectTimer);
     document.removeEventListener('visibilitychange', onVisibilityChange);
+    document.removeEventListener('visibilitychange', sendPageFocus);
+    window.removeEventListener('focus', sendPageFocus);
+    window.removeEventListener('blur', sendPageFocus);
     window.navigation?.removeEventListener('navigate', onNavigate);
     window.navigation?.removeEventListener('navigateerror', onNavigationError);
     window.removeEventListener('pagehide', onPageHide);
@@ -104,11 +107,15 @@ export function runActivityV2(config) {
     }
     return send(operation, payload);
   };
+  const sendPageFocus = () => {
+    try { port?.postMessage({ type: 'CHUDPRESENCE_PAGE_FOCUS', focused: document.hasFocus() && document.visibilityState === 'visible' }); } catch {}
+  };
   const connect = () => {
     if (ended) return;
     try {
       const next = chrome.runtime.connect({ name: `chudpresence-activity-v2:${config.id}:${config.version}:${config.capability}` });
       port = next;
+      sendPageFocus();
       next.onMessage.addListener((message) => {
         if (message?.activityId !== config.id || message.activityVersion !== config.version) return;
         if (message.type === 'CHUDPRESENCE_ACTIVITY_ABORT') stop();
@@ -129,6 +136,9 @@ export function runActivityV2(config) {
     } catch (error) { fail(error); }
   };
   globalThis.__chudpresenceV2Stop = stop;
+  window.addEventListener('focus', sendPageFocus);
+  window.addEventListener('blur', sendPageFocus);
+  document.addEventListener('visibilitychange', sendPageFocus);
   window.addEventListener('pagehide', onPageHide, { once: true });
   window.addEventListener('beforeunload', onPageHide, { once: true });
   window.navigation?.addEventListener('navigate', onNavigate);

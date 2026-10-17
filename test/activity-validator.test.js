@@ -1,5 +1,18 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+
+test('V1/V2 focus policy is optional, explicit and strictly validated', () => {
+  for (const version of [1, 2]) {
+    const report = { kind: 'generic', media: { title: 'Browsing' } };
+    assert.equal(Object.hasOwn(normalizeActivityReport(report, version), 'focusPolicy'), false);
+    for (const focusPolicy of ['foreground', 'background']) {
+      assert.equal(normalizeActivityReport({ ...report, focusPolicy }, version).focusPolicy, focusPolicy);
+    }
+    for (const focusPolicy of [null, true, false, 1, {}, [], 'visible', 'Foreground']) {
+      assert.throws(() => normalizeActivityReport({ ...report, focusPolicy }, version), /focusPolicy/);
+    }
+  }
+});
 import {
   ACTIVITY_API_VERSION,
   normalizeActivityReport,

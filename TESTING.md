@@ -18,4 +18,15 @@ Package checks independently read ZIP entries, inflate data, validate checksums 
 
 `npm run test:v2-browser` is the existing optional real Chromium security smoke test. It needs Playwright and an extension-capable Chromium executable; it uses a disposable profile and synthetic HTTPS fixtures. Configure `CHUDPRESENCE_TEST_NODE_MODULES` and `CHUDPRESENCE_TEST_BROWSER` when necessary. It is not a Firefox automation claim and does not perform Discord login.
 
+`npm run test:foreground-browser` uses a headed disposable Chromium profile and
+synthetic V1/V2 Activities. It opens ChudPresence's popup and a second extension's
+popup, switches tabs/windows, minimizes/restores the browser, returns after an
+explicit clear, and closes the source tab. It checks local presence intent and
+reports the webpage's native focus during each popup; no Discord login is used.
+The same Playwright/browser environment overrides apply. On October 17, 2026,
+the smoke passed in Microsoft Edge 155.0.4283.45 and Brave (Chromium
+155.0.8059.85). In those runs toolbar popups
+reported `WINDOW_ID_NONE` while the source document retained native focus.
+Firefox popup behavior and actual Discord delivery remain manual checks.
+
 Firefox installation, live-site playback, OAuth with the registered callback, signed production upgrades and browser-close delivery are manual checks. Follow [the Firefox checklist](ChudPresence-Firefox/README.md#manual-test-checklist). Automated tests cannot guarantee delivery after process termination or a network outage. No manual Firefox or Discord result is asserted by the implementation.

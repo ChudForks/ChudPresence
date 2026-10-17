@@ -21,6 +21,7 @@ import {
   REPORT_PLAYBACK_STATE_VALUES,
   REPORT_STATUS_DISPLAY_VALUES,
   REPORT_VISIBILITY_VALUES,
+  REPORT_FOCUS_POLICY_VALUES,
 } from './activity-contract.generated.js';
 
 export const LATEST_ACTIVITY_API_VERSION = 2;
@@ -41,6 +42,7 @@ const REPORT_PLAYBACK_FIELDS = new Set(CONTRACT_REPORT_PLAYBACK_FIELDS);
 const REPORT_DISPLAY_FIELDS = new Set(CONTRACT_REPORT_DISPLAY_FIELDS);
 const REPORT_ARTWORK_FIELDS = new Set(CONTRACT_REPORT_ARTWORK_FIELDS);
 const REPORT_VISIBILITY = new Set(REPORT_VISIBILITY_VALUES);
+const REPORT_FOCUS_POLICIES = new Set(REPORT_FOCUS_POLICY_VALUES);
 const REPORT_PLAYBACK_STATES = new Set(REPORT_PLAYBACK_STATE_VALUES);
 const REPORT_STATUS_DISPLAY = new Set(REPORT_STATUS_DISPLAY_VALUES);
 const PROTECTED_NETWORK_DOMAINS = ['discord.com', 'discordapp.com', 'discordapp.net'];
@@ -425,7 +427,7 @@ function normalizeButtons(value) {
 
 function normalizeActivityReportV1(report) {
   if (!isPlainObject(report)) fail('Activity report must be a JSON object.');
-  const allowed = new Set(['kind', 'media', 'playback', 'display', 'artwork', 'buttons', 'visibility']);
+  const allowed = new Set(['kind', 'media', 'playback', 'display', 'artwork', 'buttons', 'visibility', 'focusPolicy']);
   for (const key of Object.keys(report)) {
     if (!allowed.has(key)) fail(`Activity report contains unsupported field ${key}.`);
   }
@@ -444,6 +446,10 @@ function normalizeActivityReportV1(report) {
   };
   if (typeof normalized.visibility !== 'string' || !REPORT_VISIBILITY.has(normalized.visibility)) {
     fail('visibility must be normal, idle, private, or ad.');
+  }
+  if (report.focusPolicy !== undefined) {
+    if (!REPORT_FOCUS_POLICIES.has(report.focusPolicy)) fail('focusPolicy must be foreground or background.');
+    normalized.focusPolicy = report.focusPolicy;
   }
   const encoded = new TextEncoder().encode(JSON.stringify(normalized)).byteLength;
   if (encoded > MAX_ACTIVITY_REPORT_BYTES) fail('Activity report exceeds the 16 KB size limit.');

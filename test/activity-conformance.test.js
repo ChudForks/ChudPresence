@@ -193,6 +193,23 @@ function activityReport(title = 'A page') {
   return { kind: 'video', media: { title } };
 }
 
+test('only authenticated top-document ports can update native focus and disconnect revokes it', async () => {
+  const fake = createFakeApi();
+  const attention = [];
+  const manager = new ActivityManager({ api: fake.api, onAttention: value => attention.push(value) });
+  await manager.install(activityPackage());
+  const sender = { tab: { id: 9 }, frameId: 0, documentId: 'current-document', url: 'https://example.com/watch' };
+  const port = await connectActivity(fake, manager, sender);
+  port.postMessage({ type: 'CHUDPRESENCE_PAGE_FOCUS', focused: true });
+  port.postMessage({ type: 'CHUDPRESENCE_PAGE_FOCUS', focused: 'true' });
+  assert.deepEqual(attention, [{ tabId: 9, documentId: 'current-document', focused: true }]);
+  const child = await connectActivity(fake, manager, { ...sender, frameId: 1, documentId: 'child-document' });
+  child.postMessage({ type: 'CHUDPRESENCE_PAGE_FOCUS', focused: true });
+  assert.equal(attention.length, 1);
+  port.disconnect();
+  assert.deepEqual(attention.at(-1), { tabId: 9, documentId: 'current-document', focused: null });
+});
+
 function activityRequest(manager, operation, payload = {}, requestId = 'test-request', activityId = 'sample-activity') {
   const record = manager.records?.[activityId];
   return {
@@ -1708,6 +1725,7 @@ test('imperative Activity scripts start only in declared URLs and permitted fram
     pageWindow.top = isTop ? pageWindow : {};
     const context = {
       window: pageWindow, location: pageWindow.location, URL, AbortController,
+      document: { addEventListener() {}, removeEventListener() {}, hasFocus: () => false, visibilityState: 'hidden' },
       chrome: { runtime: { connect: () => ({ onMessage: { addListener() {} }, onDisconnect: { addListener() {} } }) } },
     };
     vm.runInNewContext(fake.scripts.get('chudpresence-activity-sample-activity').js[0].code, context);
