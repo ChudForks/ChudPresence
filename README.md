@@ -36,3 +36,10 @@ Choose **Refresh catalog** in Activity Library to discover and install Activitie
 ## Privacy
 
 See [Privacy](PRIVACY.md) for information about permissions, data handling, and Discord publishing.
+
+## Browser differences
+
+The current build has shown the following difference for browsing presence while the Activity's tab remains selected:
+
+- **Chromium:** Presence stays active when clicking into another app while the browser window remains open and isn't minimized. Minimizing the browser clears it.
+- **Firefox:** Presence clears as soon as another app gains focus, even if the browser window remains visible.
