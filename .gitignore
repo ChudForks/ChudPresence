@@ -9,3 +9,28 @@ browser-profiles/
 
 # Historical source remains local; recover it from tag v2.0.4 when needed.
 /references/legacy-activity-api-v2/
+
+# Personal development notes remain available locally.
+/local-docs/
+/ARCHITECTURE.md
+/TESTING.md
+/ChudPresence-Firefox/PORT_BASELINE.md
+/ChudPresence-Firefox/VERIFICATION.md
+/test/ACTIVITY_CONFORMANCE.md
+/references/README.md
+
+# Local editor settings, test reports, and temporary files.
+/.vscode/
+/.idea/
+/coverage/
+/playwright-report/
+/test-results/
+*.log
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+*.swp
+*.swo
+*~

@@ -26,9 +26,8 @@ Keep explicit clears for unsupported routes, invalid data and teardown: they
 remove the report, as do tab/document retirement and freshness expiration.
 Declare `minExtensionVersion: '2.0.5'` when using this field.
 
-This implementation is independent of the archived declarative V2 under
-`references/`. Activities contain JavaScript, including functions, closures,
-regular expressions, promises, and custom selection and formatting logic.
+Activities contain JavaScript, including functions, closures, regular
+expressions, promises, and custom selection and formatting logic.
 
 ## Execution boundary
 
@@ -71,7 +70,7 @@ Supported desktop platforms are Chromium 135+ and Firefox 153+. Firefox's native
 `userScripts.execute` and message-sender `documentId` requirements are enforced by
 its minimum version; Activity API versions and package contracts are identical.
 Request Firefox's optional User Scripts permission from Activity Library before
-installing Activities. See the repository's Firefox README for setup and builds.
+installing Activities. See [Firefox installation and permissions](../ChudPresence-Firefox/README.md).
 
 ## Declare page reads
 

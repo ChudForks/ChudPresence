@@ -54,7 +54,7 @@ jobs:
             'Packages built from the tagged source using the committed dependency lockfile.' \
             '' \
             'The Firefox XPI is UNSIGNED DEVELOPMENT software for temporary loading through about:debugging. It is not an AMO-signed installation package.' \
-            'See ChudPresence-Firefox/README.md for the minimum Firefox version, manual testing, add-on identity, migration, and AMO signing/submission requirements.' > "$RUNNER_TEMP/release-notes.md"
+            'See ChudPresence-Firefox/README.md for Firefox installation, permissions, and current limitations.' > "$RUNNER_TEMP/release-notes.md"
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" dist/ChudPresence-*.zip dist/ChudPresence-Firefox-*-unsigned-development.xpi --clobber
           else

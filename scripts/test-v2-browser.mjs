@@ -8,7 +8,6 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const bundledModules = 'C:/Users/Jonathan/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules';
 let playwright;
 try {
   const require = process.env.CHUDPRESENCE_TEST_NODE_MODULES
@@ -16,8 +15,7 @@ try {
     : createRequire(import.meta.url);
   playwright = require('playwright');
 } catch {
-  try { playwright = createRequire(path.join(bundledModules, 'package.json'))('playwright'); }
-  catch { throw new Error('Install Playwright or set CHUDPRESENCE_TEST_NODE_MODULES to its node_modules directory.'); }
+  throw new Error('Install Playwright or set CHUDPRESENCE_TEST_NODE_MODULES to its node_modules directory.');
 }
 
 const fixtureOrigin = 'https://www.youtube.com'; // Already granted by the extension manifest.

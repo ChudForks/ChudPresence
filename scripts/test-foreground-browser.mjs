@@ -13,7 +13,7 @@ try {
   playwright = createRequire(process.env.CHUDPRESENCE_TEST_NODE_MODULES
     ? path.join(path.resolve(process.env.CHUDPRESENCE_TEST_NODE_MODULES), 'package.json') : import.meta.url)('playwright');
 } catch {
-  playwright = createRequire('C:/Users/Jonathan/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/package.json')('playwright');
+  throw new Error('Install Playwright or set CHUDPRESENCE_TEST_NODE_MODULES to its node_modules directory.');
 }
 const scratch = await fs.mkdtemp(path.join(os.tmpdir(), 'chudpresence-foreground-browser-'));
 const otherExtension = path.join(scratch, 'other-extension');

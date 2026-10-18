@@ -1,65 +1,36 @@
 # ChudPresence 2.0.5 (unreleased)
 
 - V1/V2 reports can select `focusPolicy: 'foreground'` for browsing presence.
-  Selected-tab and browser-window focus control publication, allowing toolbar
-  popups and address-bar use without relying on webpage focus.
-- Tab switches and browser focus loss immediately suppress foreground reports;
-  returning restores valid reports. Explicit clears, closure, stale reports and
-  existing background playback behavior remain supported.
-- Updated local Anikoto, Google and Instagram packages opt browsing reports in.
-  These packages require extension 2.0.5 and must be installed/updated separately.
+  Presence is published while the Activity's tab is selected in the focused
+  browser window, including during supported toolbar-popup and address-bar use.
+- Switching tabs or leaving the browser immediately suppresses foreground
+  presence. Returning restores a still-valid report. Explicit clears, closure,
+  stale-report cleanup, and background playback remain supported.
+- Activities using the new focus policy require extension 2.0.5 and must be
+  installed or updated separately.
 
 # ChudPresence 2.0.4
 
-Stable promotion: October 15, 2026. Release tag: `v2.0.4`.
+October 15, 2026.
 
-Activity API V2 is the stable development baseline on `master`. The promotion
-preserves the V2 branch's commit history and trusted Activity API V1 support.
-The extension version remains 2.0.4 because promotion changes documentation and
-the browser verification harness, with no additional shipped runtime changes.
+- Activity API V2 is the stable baseline for new Activities. V1 remains supported.
+- Programmable V2 Activities run in isolated QuickJS/WebAssembly guests with
+  declared page reads, scoped services, and resource limits.
+- V2 supports browsing presence, navigation grace, and media scopes, plus
+  shared V1/V2 status, artwork, progress, and button controls.
+- V1 Activities can opt into navigation grace.
+- Activity Library includes improvements to installation, diagnostics, settings,
+  scrolling, and interaction.
+- The extension, popup, Activity Library, Discord fallback labels, and release
+  packages use the ChudPresence name.
 
-## Included behavior
+## Compatibility and limitations
 
-- The extension, popup, Activity Library, Discord fallback labels and release
-  archives use the ChudPresence name.
+Discord's Headless Sessions transport remains experimental. Behavior can vary
+by website and browser; immediate presence clearing cannot be guaranteed after
+a crash or network outage. See the [V2 security limits](extension/ACTIVITY_API_V2.md#security-limits-and-validation)
+for Activity access boundaries.
 
-- Programmable V2 package JavaScript runs in dedicated QuickJS/WASM guests,
-  with declared, filtered page snapshots, scoped services and resource limits.
-- V2 supports browsing presence, bounded navigation grace and media scopes,
-  plus shared V1/V2 status, state, artwork, progress and button controls.
-- V1 supports navigation handoff for packages that opt into navigation grace.
-- The Activity Library includes the accumulated installation, diagnostics,
-  settings, scrolling and interaction improvements since the old master.
-- Historical declarative V2 packages remain in the ignored local snapshot; see [recovery instructions](references/README.md).
-
-## Validation
-
-On Node.js 24.21.0, clean dependency installs, extension checks, all 330 extension
-tests and ZIP packaging passed. The disposable Edge 155.0.4283.45 smoke test
-passed using the actual unpacked extension, user scripts and QuickJS/WASM:
-page filtering, credential isolation, storage and network boundaries, presence
-reports, execution interruption, failure/reload behavior, worker cleanup,
-navigation grace and immediate clearing when a tab closes.
-
-The separate local package repositories passed their contract, catalog and
-TypeScript checks, all 96 V1 tests and all 56 V2 tests. V1 package version checks
-used `origin/main`, the base of the local unpublished package commits; V2 used
-its default `HEAD^` base. See [TESTING.md](TESTING.md) for details and older checks.
-
-## Known limits and installation
-
-Stable status applies to the extension baseline. Synthetic browser fixtures do
-not certify every signed-in service, Chromium version, interactive permission
-flow or current Discord profile rendering. Discord's Headless Sessions
-transport remains experimental. The [remaining browser checks](TESTING.md#remaining-browser-checks-before-distribution)
-and [V2 security limits](extension/ACTIVITY_API_V2.md#security-limits-and-validation)
-still apply.
-
-Build with `npm ci`, `npm run check`, `npm test` and `npm run build`, then load
-`extension/` or the extracted versioned folder from `dist/` as an unpacked
-extension. On supported Chromium versions, enable user scripts as described in
-[README.md](README.md). Existing locally installed Activities retain their
-stored package source; load updated package files separately when needed.
-
-V1 and V2 Activity repositories remain independent. This release does not push
-their local commits, update their remote catalogs or publish to a browser store.
+See [installation instructions](README.md#install) for browser setup. Activity
+packages update separately from the extension. Existing locally loaded
+Activities retain their stored source until you load updated package files.
