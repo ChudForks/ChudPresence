@@ -18,6 +18,25 @@ Package checks independently read ZIP entries, inflate data, validate checksums 
 
 `npm run test:v2-browser` is the existing optional real Chromium security smoke test. It needs Playwright and an extension-capable Chromium executable; it uses a disposable profile and synthetic HTTPS fixtures. Configure `CHUDPRESENCE_TEST_NODE_MODULES` and `CHUDPRESENCE_TEST_BROWSER` when necessary. It is not a Firefox automation claim and does not perform Discord login.
 
+`npm run test:activities-browser` exercises the Activity Library in a loaded
+Chromium extension with a disposable profile and synthetic, integrity-checked
+catalog packages. It covers one automatic catalog refresh per opening (using
+existing repository permissions), manual refresh and cache errors, search and category
+filters, a single category focus indicator, keyboard selection, V1/V2 disclosures,
+quick Add/Remove without leaving the collection or resetting filters/focus, installation/update/removal,
+settings, enable/disable, developer logs, local loading, the User Scripts dialog,
+and reduced motion. Collection layout checks cover 1920, 1440, 1280, 1101,
+1024, 768, 700, 520, 390 and 320px widths, including grid/list switching,
+horizontal section navigation, the home link, and arrow-key selection.
+Full-width details cover Back/Escape focus restoration and catalog errors
+while details are open. Detail layout checks cover 1440,
+1024, 768, 390 and 320px widths.
+The same Playwright/browser overrides apply; add `-- --headed` to see the run.
+Screenshots go to the temporary test directory, or to `CHUDPRESENCE_UI_ARTIFACTS`
+when set. Website and catalog access is preapproved only in this disposable
+profile; native permission-prompt interaction and Firefox installation remain
+manual checks.
+
 `npm run test:foreground-browser` uses a headed disposable Chromium profile and
 synthetic V1/V2 Activities. It opens ChudPresence's popup and a second extension's
 popup, switches tabs/windows, minimizes/restores the browser, returns after an

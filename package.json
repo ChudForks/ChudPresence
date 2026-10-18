@@ -9,6 +9,7 @@
     "test": "node --test test/*.test.js",
     "test:v2-browser": "node scripts/test-v2-browser.mjs",
     "test:foreground-browser": "node scripts/test-foreground-browser.mjs",
+    "test:activities-browser": "node scripts/test-activities-browser.mjs",
     "build": "node scripts/build.mjs",
     "build:chromium": "node scripts/build.mjs chromium",
     "build:firefox": "node scripts/build.mjs firefox",

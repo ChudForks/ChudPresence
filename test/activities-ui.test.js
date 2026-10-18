@@ -12,10 +12,25 @@ test('Activity Library exposes the four library views and local package loading'
   }
 });
 
+test('Activity Library provides a selectable list and responsive details inspector', async () => {
+  const [html, css] = await Promise.all([
+    readExtensionFile('activities.html'),
+    readExtensionFile('activities.css'),
+  ]);
+  assert.match(html, /<aside\b[^>]*id="activity-inspector"/);
+  for (const id of ['inspector-title', 'inspector-content', 'inspector-close']) {
+    assert.match(html, new RegExp(`id="${id}"`));
+  }
+  assert.match(html, /activity-inspector[\s\S]*inspector-content/);
+  assert.match(css, /\.activity-row/);
+  assert.match(css, /@media\s*\([^)]*max-width:\s*1100px/);
+  assert.match(css, /\.inspector(?:\.is-open|:not\(\.is-open\))/);
+});
+
 test('Activity Library explains Chromium user script availability and requests only declared origins', async () => {
   const [html, script] = await Promise.all([readExtensionFile('activities.html'), readExtensionFile('activities.js')]);
   assert.match(html, /Chrome 138[\s\S]*Allow User Scripts/);
-  assert.match(script, /chrome\.permissions\.request\(\{ origins \}\)/);
+  assert.match(script, /api\.permissions\.request\(\{ origins \}\)/);
   assert.match(script, /api\.userScripts\?\.execute/);
   assert.doesNotMatch(script, /requestUserScriptsPermission|Firefox requires|Firefox permission/);
   assert.match(script, /activityCatalogIconUrl\(\{ id, icon, catalogSource \}\)/);

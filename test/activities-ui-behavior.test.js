@@ -24,6 +24,7 @@ class Element {
     this.clientHeight = 300;
     this.classList = {
       add: (...names) => { this.className += ` ${names.join(' ')}`; },
+      contains: (name) => this.className.split(/\s+/).includes(name),
       toggle: (name, enabled) => {
         const names = new Set(this.className.split(/\s+/).filter(Boolean));
         if (enabled) names.add(name);
@@ -61,9 +62,19 @@ class Element {
     }
     return null;
   }
+  querySelectorAll(selector) {
+    const matches = [];
+    for (const child of this.children) {
+      if (typeof child !== 'object') continue;
+      if (child.matches(selector)) matches.push(child);
+      matches.push(...child.querySelectorAll(selector));
+    }
+    return matches;
+  }
 }
 
-async function createLibrary({ installed = [], catalog = null, developerMode = false, respond = null } = {}) {
+async function createLibrary({ installed = [], catalog = null, developerMode = false, respond = null, narrow = false,
+  downloadActivityImpl = null, fetchCatalogImpl = null, repositoryPermission = true } = {}) {
   installed = structuredClone(installed);
   const [source, html] = await Promise.all([
     readFile(new URL('../extension/activities.js', import.meta.url), 'utf8'),
@@ -90,11 +101,21 @@ async function createLibrary({ installed = [], catalog = null, developerMode = f
     activeElement: null, hidden: false,
     getElementById: (id) => elements.get(id),
     createElement(tag) { const node = new Element(tag); node.ownerDocument = document; return node; },
-    querySelectorAll: (selector) => [...elements.values()].filter((node) => node.matches(selector)),
+    querySelectorAll: (selector) => {
+      const matches = new Set();
+      for (const node of elements.values()) {
+        if (node.matches(selector)) matches.add(node);
+        for (const child of node.querySelectorAll(selector)) matches.add(child);
+      }
+      return [...matches];
+    },
   };
   for (const node of elements.values()) node.ownerDocument = document;
   const calls = [];
   const copied = [];
+  const catalogFetches = [];
+  const permissionChecks = [];
+  const permissionRequests = [];
   let failState = false;
   let failSave = false;
   let failCopy = false;
@@ -118,15 +139,26 @@ async function createLibrary({ installed = [], catalog = null, developerMode = f
       },
     },
     storage: { local: { get: async () => ({ developerMode }), set: async () => {} } },
+    permissions: {
+      contains: async request => { permissionChecks.push(request); return repositoryPermission; },
+      request: async request => { permissionRequests.push(request); return true; },
+    },
     userScripts: { execute() {} },
   };
   const context = vm.createContext({
     ...validator, ...developerDiagnostics, ...browserPlatform, document, chrome, JSON, URL, Uint8Array, btoa, structuredClone,
     navigator: { clipboard: { async writeText(value) { if (failCopy) throw new Error('Clipboard unavailable'); copied.push(value); } } },
     location: { href: 'https://example.test/activities.html' },
+    window: { matchMedia: () => ({ matches: narrow }) },
+    matchMedia: () => ({ matches: narrow }),
     Option: class extends Element { constructor(label, value) { super('option'); this.textContent = label; this.value = value; } },
     activityCatalogIconUrl,
     compareActivityVersions,
+    downloadActivity: downloadActivityImpl || (async () => { throw new Error('Unexpected package download'); }),
+    fetchCatalog: async options => {
+      catalogFetches.push(options);
+      return fetchCatalogImpl ? fetchCatalogImpl(options) : { catalog: catalog || { activities: [] }, fetchedAt: 1 };
+    },
     readCatalogCache: async () => ({ catalog, fetchedAt: 0 }),
     requestHostPermissions: async () => true,
     setInterval: (callback) => { polling = callback; },
@@ -134,7 +166,7 @@ async function createLibrary({ installed = [], catalog = null, developerMode = f
   vm.runInContext(source.replace(/^import[\s\S]*?from '[^']+';\r?\n/gm, ''), context);
   await new Promise((resolve) => setImmediate(resolve));
   return {
-    document, elements, calls, copied, poll: () => polling(),
+    document, elements, calls, copied, catalogFetches, permissionChecks, permissionRequests, poll: () => polling(),
     setInstalled(next) { installed = structuredClone(next); },
     failState: () => { failState = true; }, failSave: () => { failSave = true; }, failCopy: () => { failCopy = true; },
   };
@@ -146,6 +178,78 @@ function packageFiles(id, readMetadata = null) {
   return [{ name: 'metadata.json', text: readMetadata || (async () => metadata) },
     { name: 'activity.js', text: async () => 'ChudPresence.clear();' }];
 }
+
+test('opening the Library forces one fresh catalog fetch, while navigation and installed-state polling do not', async () => {
+  const catalog = { activities: simpleCatalogEntries() };
+  let openings = 0;
+  const options = { catalog, fetchCatalogImpl: async () => {
+    openings++;
+    return { catalog, fetchedAt: 1 };
+  } };
+  const ui = await createLibrary(options);
+  assert.equal(ui.catalogFetches.length, 1);
+  assert.equal(ui.catalogFetches[0].force, true);
+  assert.equal(ui.permissionChecks.length, 1);
+  assert.equal(ui.permissionRequests.length, 0);
+  assert.equal(ui.elements.has('page-status'), false);
+  assert.equal(ui.elements.has('status-dot'), false);
+  assert.equal(ui.elements.get('catalog-notice').textContent, '');
+  for (const view of ['installed', 'updates', 'developer', 'discover']) await showView(ui, view);
+  await ui.elements.get('layout-list').emit('click');
+  await ui.poll();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ui.catalogFetches.length, 1);
+  await createLibrary(options);
+  assert.equal(openings, 2, 'a new Library opening must fetch even with a cached catalog');
+});
+
+test('cached Activities stay usable during the opening refresh and a second refresh cannot overlap it', async () => {
+  const catalog = { activities: simpleCatalogEntries() };
+  let finishRefresh;
+  const pending = new Promise(resolve => { finishRefresh = resolve; });
+  const ui = await createLibrary({ catalog, fetchCatalogImpl: () => pending });
+  const refresh = ui.elements.get('refresh-catalog');
+  assert.equal(refresh.disabled, true);
+  assert.equal(ui.elements.get('discover-list').children.length, 3);
+  const search = ui.elements.get('search');
+  search.value = 'alpha';
+  await search.emit('input');
+  await refresh.emit('click');
+  assert.equal(ui.catalogFetches.length, 1);
+  const freshCatalog = { activities: catalog.activities.map(entry => ({ ...entry, name: entry.name + ' updated' })) };
+  finishRefresh({ catalog: freshCatalog, fetchedAt: 1 });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(refresh.disabled, false);
+  assert.equal(search.value, 'alpha');
+  assert.equal(ui.elements.get('discover-list').children.length, 1);
+  assert.equal(listRow(ui, 'discover', 'alpha').querySelector('.row-title').textContent, 'ALPHA updated');
+  assert.equal(ui.elements.get('activity-inspector').hidden, true);
+});
+
+test('an opening refresh failure preserves cached Activities and exposes a retryable error', async () => {
+  const ui = await createLibrary({ catalog: { activities: simpleCatalogEntries() }, fetchCatalogImpl: async () => {
+    throw new Error('Offline');
+  } });
+  assert.equal(ui.catalogFetches.length, 1);
+  assert.equal(ui.elements.get('discover-list').children.length, 3);
+  assert.match(ui.elements.get('catalog-notice').textContent, /cached catalog.*Offline/);
+  assert.equal(ui.elements.get('refresh-catalog').disabled, false);
+  assert.equal(ui.permissionRequests.length, 0);
+});
+
+test('opening without catalog permission keeps the cache and leaves the permission prompt to manual Refresh', async () => {
+  const ui = await createLibrary({ catalog: { activities: simpleCatalogEntries() }, repositoryPermission: false });
+  assert.equal(ui.catalogFetches.length, 0);
+  assert.equal(ui.permissionRequests.length, 0);
+  assert.equal(ui.elements.get('discover-list').children.length, 3);
+  assert.match(ui.elements.get('catalog-notice').textContent, /Use Refresh catalog to allow catalog access/);
+  await ui.elements.get('refresh-catalog').emit('click');
+  assert.equal(ui.permissionRequests.length, 1);
+  assert.deepEqual([...ui.permissionRequests[0].origins], ['https://raw.githubusercontent.com/*', 'https://api.github.com/*']);
+  assert.equal(ui.catalogFetches.length, 1);
+  assert.equal(ui.catalogFetches[0].force, true);
+  assert.match(ui.elements.get('catalog-notice').textContent, /Loaded 3 Activities/);
+});
 
 test('a slower previous file selection cannot replace the local package being loaded', async () => {
   const ui = await createLibrary();
@@ -183,69 +287,230 @@ const record = {
   settings: [{ id: 'label', type: 'string', label: 'Label', default: 'Original' }],
 };
 
+test('local installation focuses the selected Installed inspector after selection changes', async () => {
+  let stored = diagnosticRecords();
+  let ui;
+  ui = await createLibrary({ installed: stored, developerMode: true, narrow: true, async respond(message) {
+    if (message.type === 'ACTIVITY_LIBRARY_STATE') {
+      return { ok: true, result: { installed: structuredClone(stored), userScriptsPermission: true } };
+    }
+    if (message.type === 'ACTIVITY_REMOVE') {
+      stored = stored.filter((entry) => entry.id !== message.id);
+      ui?.setInstalled(stored);
+      return { ok: true, result: {} };
+    }
+    if (message.type === 'ACTIVITY_INSTALL') {
+      const metadata = message.activityPackage.metadata;
+      stored = [...stored, { ...metadata, enabled: true, status: 'waiting', source: { type: 'local' } }];
+      ui?.setInstalled(stored);
+      return { ok: true, result: metadata };
+    }
+  } });
+  await showView(ui, 'installed');
+  await selectRow(ui, 'installed', 'beta');
+  await ui.elements.get('inspector-content').querySelector('.activity-remove-action').emit('click');
+  assert.equal(inspectorDetail(ui).dataset.activityId, 'alpha');
+
+  const files = ui.elements.get('local-files');
+  files.files = packageFiles('new-local');
+  await files.emit('change');
+  await ui.elements.get('load-local').emit('click');
+  assert.equal(ui.elements.get('installed-view').hidden, false);
+  assert.equal(inspectorDetail(ui).dataset.activityId, 'new-local');
+  assert.equal(listRow(ui, 'installed', 'new-local').querySelector('.activity-select').getAttribute('aria-pressed'), 'true');
+  assert.equal(ui.elements.get('activity-inspector').classList.contains('is-open'), true);
+  const name = inspectorDetail(ui).querySelector('.inspector-name');
+  assert.equal(ui.document.activeElement, name);
+  assert.equal(name.focusOptions.preventScroll, true);
+  assert.equal(ui.elements.get('activity-inspector').scrollIntoViewOptions.block, 'start');
+});
+
+test('repository installation focuses the selected Installed inspector', async () => {
+  const entry = {
+    id: 'remote-new', name: 'Remote New', description: 'Repository fixture', version: '1.0.0', apiVersion: 2,
+    matches: ['https://remote.example.test/*'], pageAccess: { url: true },
+  };
+  let stored = [diagnosticRecords()[0]];
+  let ui;
+  ui = await createLibrary({ installed: stored, catalog: { activities: [entry] }, async respond(message) {
+    if (message.type === 'ACTIVITY_LIBRARY_STATE') {
+      return { ok: true, result: { installed: structuredClone(stored), userScriptsPermission: true } };
+    }
+    if (message.type === 'ACTIVITY_INSTALL') {
+      const metadata = message.activityPackage.metadata;
+      stored = [...stored, { ...metadata, enabled: true, status: 'waiting', source: { type: message.activityPackage.sourceType } }];
+      ui?.setInstalled(stored);
+      return { ok: true, result: metadata };
+    }
+  }, narrow: true, downloadActivityImpl: async () => ({ metadata: entry, source: 'fixture', code: 'void 0;' }) });
+  await showView(ui, 'installed');
+  assert.equal(inspectorDetail(ui).dataset.activityId, 'alpha');
+  await showView(ui, 'discover');
+  await ui.elements.get('inspector-content').querySelector('.activity-install-action').emit('click');
+  assert.equal(ui.elements.get('installed-view').hidden, false);
+  assert.equal(inspectorDetail(ui).dataset.activityId, 'remote-new');
+  assert.equal(listRow(ui, 'installed', 'remote-new').querySelector('.activity-select').getAttribute('aria-pressed'), 'true');
+  assert.equal(ui.elements.get('activity-inspector').classList.contains('is-open'), true);
+  const name = inspectorDetail(ui).querySelector('.inspector-name');
+  assert.equal(ui.document.activeElement, name);
+  assert.equal(name.focusOptions.preventScroll, true);
+  assert.equal(ui.elements.get('activity-inspector').scrollIntoViewOptions.block, 'start');
+});
+
+test('removing the last installed Activity returns focus to the Installed tab', async () => {
+  let stored = [{ ...record }];
+  let ui;
+  ui = await createLibrary({ installed: stored, async respond(message) {
+    if (message.type === 'ACTIVITY_LIBRARY_STATE') {
+      return { ok: true, result: { installed: structuredClone(stored), userScriptsPermission: true } };
+    }
+    if (message.type === 'ACTIVITY_REMOVE') {
+      stored = [];
+      ui?.setInstalled(stored);
+      return { ok: true, result: {} };
+    }
+  } });
+  await showView(ui, 'installed');
+  assert.equal(inspectorDetail(ui).dataset.activityId, record.id);
+
+  await ui.elements.get('inspector-content').querySelector('.activity-remove-action').emit('click');
+
+  assert.equal(listRow(ui, 'installed', record.id), undefined);
+  assert.equal(inspectorDetail(ui), null);
+  const installedTab = ui.elements.get('tab-installed');
+  assert.equal(ui.document.activeElement, installedTab);
+  assert.equal(installedTab.focusOptions.preventScroll, true);
+});
+
+async function showView(ui, view) {
+  await ui.elements.get(`tab-${view}`).emit('click');
+}
+
+function listRow(ui, view, id) {
+  return ui.elements.get(`${view}-list`).children.find((row) => row.dataset.activityId === id);
+}
+
+async function selectRow(ui, view, id) {
+  const row = listRow(ui, view, id);
+  assert.ok(row, `expected ${id} row in ${view}`);
+  await row.querySelector('.activity-select').emit('click');
+  return row;
+}
+
+function inspectorDetail(ui) {
+  return ui.elements.get('inspector-content').querySelector('.activity-detail');
+}
+
+function textContentTree(node) {
+  return [node?.textContent || '', ...(node?.children || []).filter((child) => typeof child === 'object').map(textContentTree)].join(' ');
+}
+
 test('a rejected Activity setting remains editable when the worker cannot refresh', async () => {
   const ui = await createLibrary({ installed: [record] });
-  const input = ui.elements.get('installed-list').querySelector('input');
+  await showView(ui, 'installed');
+  const input = ui.elements.get('inspector-content').querySelector('input');
   input.value = 'Changed';
   ui.failSave();
   ui.failState();
   await input.emit('change');
   assert.equal(input.disabled, false);
   assert.equal(input.value, 'Original');
-  assert.match(ui.elements.get('page-status').textContent, /Setting rejected/);
+  assert.match(ui.elements.get('library-feedback').textContent, /Setting rejected/);
 });
 
 test('a successful setting save survives a failed refresh and reports the refresh failure', async () => {
   const ui = await createLibrary({ installed: [record] });
-  const input = ui.elements.get('installed-list').querySelector('input');
+  await showView(ui, 'installed');
+  const input = ui.elements.get('inspector-content').querySelector('input');
   input.value = 'Changed';
   ui.failState();
   await input.emit('change');
   assert.equal(input.disabled, false);
   assert.equal(input.value, 'Changed');
-  assert.match(ui.elements.get('page-status').textContent, /Saved, but Activity state could not refresh/);
+  assert.match(ui.elements.get('library-feedback').textContent, /Saved, but Activity state could not refresh/);
   input.value = 'Rejected change';
   ui.failSave();
   await input.emit('change');
   assert.equal(input.value, 'Changed');
 });
 
+test('a successful setting save restores focus and text selection to that setting after refresh', async () => {
+  const configured = {
+    ...record,
+    settings: [
+      { id: 'label', type: 'string', label: 'Label', default: 'Original' },
+      { id: 'endpoint', type: 'string', label: 'Endpoint', default: 'https://old.example.test' },
+    ],
+  };
+  let stored = [structuredClone(configured)];
+  let ui;
+  ui = await createLibrary({ installed: stored, async respond(message) {
+    if (message.type === 'ACTIVITY_LIBRARY_STATE') {
+      return { ok: true, result: { installed: structuredClone(stored), userScriptsPermission: true } };
+    }
+    if (message.type === 'ACTIVITY_SET_SETTING') {
+      stored = stored.map((entry) => entry.id === message.id
+        ? { ...entry, settingValues: { ...entry.settingValues, [message.settingId]: message.value } }
+        : entry);
+      ui?.setInstalled(stored);
+      return { ok: true, result: { value: message.value } };
+    }
+  } });
+  await showView(ui, 'installed');
+  const original = ui.elements.get('inspector-content').querySelectorAll('input')
+    .find((control) => control.dataset.settingId === 'endpoint');
+  original.value = 'https://new.example.test/path';
+  original.focus();
+  original.setSelectionRange(8, 17);
+
+  await original.emit('change');
+
+  const replacement = ui.elements.get('inspector-content').querySelectorAll('input')
+    .find((control) => control.dataset.settingId === 'endpoint');
+  assert.notEqual(replacement, original);
+  assert.equal(replacement.value, 'https://new.example.test/path');
+  assert.equal(ui.document.activeElement, replacement);
+  assert.equal(replacement.focusOptions.preventScroll, true);
+  assert.deepEqual([replacement.selectionStart, replacement.selectionEnd], [8, 17]);
+});
+
 test('Library polling preserves text being edited in Activity settings', async () => {
   const ui = await createLibrary({ installed: [record] });
-  const input = ui.elements.get('installed-list').querySelector('input');
+  await showView(ui, 'installed');
+  const input = ui.elements.get('inspector-content').querySelector('input');
   input.value = 'Unsaved text';
   ui.document.activeElement = input;
   ui.poll();
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(ui.elements.get('installed-list').querySelector('input'), input);
+  assert.equal(ui.elements.get('inspector-content').querySelector('input'), input);
   assert.equal(input.value, 'Unsaved text');
 });
 
 test('a pending Library poll cannot replace a setting input when editing starts', async () => {
   const ui = await createLibrary({ installed: [record] });
-  const input = ui.elements.get('installed-list').querySelector('input');
+  await showView(ui, 'installed');
+  const input = ui.elements.get('inspector-content').querySelector('input');
   ui.poll();
   input.value = 'Unsaved text';
   ui.document.activeElement = input;
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(ui.elements.get('installed-list').querySelector('input'), input);
+  assert.equal(ui.elements.get('inspector-content').querySelector('input'), input);
   assert.equal(input.value, 'Unsaved text');
 });
 
 test('Library polling preserves focus on the same Activity action without scrolling', async () => {
   const records = diagnosticRecords();
   const ui = await createLibrary({ installed: records, developerMode: true });
-  ui.elements.get('installed-view').hidden = false;
+  await showView(ui, 'installed');
+  await selectRow(ui, 'installed', 'beta');
   for (const action of ['activity-logs-action', 'activity-reload-action', 'activity-toggle-action', 'activity-remove-action']) {
-    const oldCard = ui.elements.get('installed-list').children.find((card) => card.dataset.activityId === 'beta');
-    const oldButton = oldCard.querySelector(`.${action}`);
+    const oldButton = ui.elements.get('inspector-content').querySelector(`.${action}`);
     oldButton.focus();
     records[1].name = `Beta ${action}`;
     ui.setInstalled(records);
     ui.poll();
     await new Promise((resolve) => setImmediate(resolve));
-    const newCard = ui.elements.get('installed-list').children.find((card) => card.dataset.activityId === 'beta');
-    const newButton = newCard.querySelector(`.${action}`);
+    const newButton = ui.elements.get('inspector-content').querySelector(`.${action}`);
     assert.notEqual(newButton, oldButton);
     assert.equal(ui.document.activeElement, newButton);
     assert.equal(newButton.focusOptions.preventScroll, true);
@@ -255,17 +520,15 @@ test('Library polling preserves focus on the same Activity action without scroll
 test('A focused Reload action moves to Enable when that Activity becomes disabled', async () => {
   const records = diagnosticRecords();
   const ui = await createLibrary({ installed: records, developerMode: true });
-  ui.elements.get('installed-view').hidden = false;
-  const oldCard = ui.elements.get('installed-list').children.find((card) => card.dataset.activityId === 'alpha');
-  oldCard.querySelector('.activity-reload-action').focus();
+  await showView(ui, 'installed');
+  ui.elements.get('inspector-content').querySelector('.activity-reload-action').focus();
   records[0].enabled = false;
   records[0].status = 'disabled';
   ui.setInstalled(records);
   ui.poll();
   await new Promise((resolve) => setImmediate(resolve));
-  const newCard = ui.elements.get('installed-list').children.find((card) => card.dataset.activityId === 'alpha');
-  assert.equal(newCard.querySelector('.activity-reload-action').disabled, true);
-  const enable = newCard.querySelector('.activity-toggle-action');
+  assert.equal(ui.elements.get('inspector-content').querySelector('.activity-reload-action').disabled, true);
+  const enable = ui.elements.get('inspector-content').querySelector('.activity-toggle-action');
   assert.equal(enable.textContent, 'Enable');
   assert.equal(ui.document.activeElement, enable);
   assert.equal(enable.focusOptions.preventScroll, true);
@@ -294,21 +557,42 @@ test('Discover, Installed, and Updates load V2 catalog icons from the pinned V2 
   }
 });
 
-test('Live diagnostics update without replacing unchanged cards in any Library grid', async () => {
+test('Live diagnostics update without replacing unchanged rows or the selected inspector', async () => {
   const state = pageAccessLibrary();
   const ui = await createLibrary({ ...state, developerMode: true });
-  const grids = ['discover-list', 'installed-list', 'updates-list'];
-  const cards = grids.map((id) => ui.elements.get(id).children[0]);
-  for (const card of cards) card.querySelector('.card-page-access').open = true;
+  const lists = ['discover-list', 'installed-list', 'updates-list'];
+  const rows = lists.map((id) => ui.elements.get(id).children[0]);
+  const detail = inspectorDetail(ui);
+  const access = detail.querySelector('.card-page-access');
+  access.open = true;
   state.installed[0].activityLogs = [{ timestamp: '2026-10-15T12:00:00Z', level: 'info', args: ['New live diagnostic'] }];
   ui.setInstalled(state.installed);
   ui.poll();
   await new Promise((resolve) => setImmediate(resolve));
-  for (const [index, id] of grids.entries()) {
-    assert.equal(ui.elements.get(id).children[0], cards[index]);
-    assert.equal(cards[index].querySelector('.card-page-access').open, true);
-  }
+  for (const [index, id] of lists.entries()) assert.equal(ui.elements.get(id).children[0], rows[index]);
+  assert.equal(inspectorDetail(ui), detail);
+  assert.equal(inspectorDetail(ui).querySelector('.card-page-access').open, true);
   assert.match(ui.elements.get('developer-log-output').value, /New live diagnostic/);
+});
+
+test('Installed inspector keeps its controls when only diagnostic keys change', async () => {
+  const records = diagnosticRecords();
+  records[0].settings = [{ id: 'label', type: 'string', label: 'Label', default: 'Original' }];
+  const ui = await createLibrary({ installed: records, developerMode: true });
+  await showView(ui, 'installed');
+  const detail = inspectorDetail(ui);
+  const setting = detail.querySelector('input');
+  const updated = diagnosticRecords();
+  updated[0].settings = records[0].settings;
+  updated[0].activityLogs.push({ timestamp: '2026-10-15T12:00:05Z', level: 'info', args: ['Installed-only diagnostic marker'] });
+  updated[0].networkRequests.push({ startedAt: '2026-10-15T12:00:06Z', method: 'GET', url: 'https://alpha.test/new', state: 'complete', status: 200 });
+  updated[0].normalizedReport = { media: { title: 'Updated installed snapshot' } };
+  ui.setInstalled(updated);
+  ui.poll();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(inspectorDetail(ui), detail);
+  assert.equal(inspectorDetail(ui).querySelector('input'), setting);
+  assert.match(ui.elements.get('developer-log-output').value, /Installed-only diagnostic marker/);
 });
 
 for (const view of ['discover', 'installed', 'updates']) {
@@ -316,8 +600,8 @@ for (const view of ['discover', 'installed', 'updates']) {
     test(`${view} preserves declared access and keyboard focus across a card update${pending ? ' already in flight' : ''}`, async () => {
       const state = pageAccessLibrary();
       const ui = await createLibrary(state);
-      const grid = ui.elements.get(`${view}-list`);
-      const original = grid.children[0].querySelector('.card-page-access');
+      await showView(ui, view);
+      const original = ui.elements.get('inspector-content').querySelector('.card-page-access');
       const summary = original.querySelector('summary');
       state.installed[0].version = '1.1.0';
       ui.setInstalled(state.installed);
@@ -327,7 +611,7 @@ for (const view of ['discover', 'installed', 'updates']) {
       summary.focus();
       if (!pending) ui.poll();
       await new Promise((resolve) => setImmediate(resolve));
-      const refreshed = grid.children[0].querySelector('.card-page-access');
+      const refreshed = ui.elements.get('inspector-content').querySelector('.card-page-access');
       assert.notEqual(refreshed, original);
       assert.equal(refreshed.open, true);
       assert.equal(refreshed.querySelector('.page-access-list').tag, 'ul');
@@ -343,7 +627,7 @@ for (const view of ['discover', 'installed', 'updates']) {
       ui.setInstalled(state.installed);
       ui.poll();
       await new Promise((resolve) => setImmediate(resolve));
-      assert.equal(grid.children[0].querySelector('.card-page-access').open, false);
+      assert.equal(ui.elements.get('inspector-content').querySelector('.card-page-access').open, false);
     });
   }
 }
@@ -351,15 +635,333 @@ for (const view of ['discover', 'installed', 'updates']) {
 test('Discover remembers disclosures through filtering without opening them in another Library view', async () => {
   const ui = await createLibrary(pageAccessLibrary());
   const grid = ui.elements.get('discover-list');
-  grid.children[0].querySelector('.card-page-access').open = true;
+  ui.elements.get('inspector-content').querySelector('.card-page-access').open = true;
   const search = ui.elements.get('search');
   search.value = 'no matching Activity';
   await search.emit('input');
   assert.equal(grid.children[0].className, 'empty-state');
+  assert.equal(inspectorDetail(ui), null);
   search.value = '';
   await search.emit('input');
-  assert.equal(grid.children[0].querySelector('.card-page-access').open, true);
-  assert.equal(ui.elements.get('installed-list').querySelector('.card-page-access').open, false);
+  assert.equal(inspectorDetail(ui).dataset.activityId, 'page-access');
+  assert.equal(ui.elements.get('inspector-content').querySelector('.card-page-access').open, true);
+  await showView(ui, 'installed');
+  assert.equal(ui.elements.get('inspector-content').querySelector('.card-page-access').open, false);
+});
+
+function simpleCatalogEntries() {
+  return ['alpha', 'beta', 'gamma'].map((id) => ({
+    id, name: id.toUpperCase(), version: '1.0.0', apiVersion: 2,
+    description: `${id} Activity`, matches: [`https://${id}.example.test/*`],
+    pageAccess: { url: true },
+  }));
+}
+
+test('Discover search matches aliases and tags and combines with category filtering', async () => {
+  const entries = [
+    { id: 'alpha', name: 'Alpha Audio', description: 'Audio player', category: 'music', aliases: ['moon alias'], tags: ['indie-tag'], version: '1.0.0', apiVersion: 2, matches: ['https://alpha.example.test/*'] },
+    { id: 'beta', name: 'Beta Video', description: 'Video player', category: 'media', aliases: ['screen name'], tags: ['cinema-tag'], version: '1.0.0', apiVersion: 2, matches: ['https://beta.example.test/*'] },
+    { id: 'gamma', name: 'Gamma Audio', description: 'Another player', category: 'music', aliases: [], tags: ['ambient-tag'], version: '1.0.0', apiVersion: 2, matches: ['https://gamma.example.test/*'] },
+  ];
+  const ui = await createLibrary({ catalog: { activities: entries } });
+  const search = ui.elements.get('search');
+  const category = ui.elements.get('category-filter');
+  const visibleIds = () => ui.elements.get('discover-list').children.map((row) => row.dataset.activityId).filter(Boolean);
+
+  search.value = 'moon alias';
+  await search.emit('input');
+  assert.deepEqual(visibleIds(), ['alpha']);
+  search.value = 'cinema-tag';
+  await search.emit('input');
+  assert.deepEqual(visibleIds(), ['beta']);
+
+  search.value = '';
+  category.value = 'music';
+  await category.emit('change');
+  assert.deepEqual(visibleIds(), ['alpha', 'gamma']);
+  search.value = 'Beta';
+  await search.emit('input');
+  assert.deepEqual(visibleIds(), []);
+  assert.equal(inspectorDetail(ui), null);
+  category.value = 'all';
+  await category.emit('change');
+  assert.deepEqual(visibleIds(), ['beta']);
+  assert.equal(inspectorDetail(ui).dataset.activityId, 'beta');
+});
+
+test('The inspector states V1 trust clearly and lists V2 page reads and network origins', async () => {
+  const entries = [
+    { id: 'trusted-v1', name: 'Trusted V1', version: '1.0.0', apiVersion: 1, matches: ['https://v1.example.test/*'] },
+    { id: 'sandboxed-v2', name: 'Sandboxed V2', version: '1.0.0', apiVersion: 2,
+      matches: ['https://v2.example.test/*'], network: ['https://api.example.test/*'],
+      pageAccess: { url: true, queryParameters: ['video'] } },
+  ];
+  const ui = await createLibrary({ catalog: { activities: entries } });
+  const trusted = inspectorDetail(ui);
+  assert.equal(trusted.dataset.activityId, 'trusted-v1');
+  assert.equal(trusted.querySelector('.trust-label').textContent, 'Trusted Activity code');
+  assert.match(textContentTree(trusted), /V1 code can read page content/);
+  assert.equal(trusted.querySelector('.card-page-access'), null);
+
+  await selectRow(ui, 'discover', 'sandboxed-v2');
+  const sandboxed = inspectorDetail(ui);
+  assert.equal(sandboxed.querySelector('.trust-label').textContent, 'Sandboxed Activity');
+  assert.match(textContentTree(sandboxed), /Page reads are limited to the fields declared below/);
+  assert.deepEqual(sandboxed.querySelector('.page-access-list').children.map((item) => item.textContent), [
+    'Page origin and path', 'Query parameters: video',
+  ]);
+  assert.match(textContentTree(sandboxed), /Additional network access is requested for these declared origins/);
+  assert.match(textContentTree(sandboxed), /https:\/\/api\.example\.test\/\*/);
+});
+
+test('Activity rows select one item and support Arrow, Home, and End navigation', async () => {
+  const ui = await createLibrary({ catalog: { activities: simpleCatalogEntries() } });
+  const list = ui.elements.get('discover-list');
+  const selectors = list.children.map((row) => row.querySelector('.activity-select'));
+  assert.deepEqual(selectors.map((button) => button.tabIndex), [0, -1, -1]);
+  assert.deepEqual(selectors.map((button) => button.getAttribute('aria-pressed')), ['true', 'false', 'false']);
+  for (const row of list.children) {
+    assert.equal(row.querySelectorAll('.activity-select').length, 1);
+    assert.equal(row.querySelector('.activity-select').querySelector('button'), null);
+    assert.ok(row.querySelector('.activity-quick-action'));
+    assert.equal(row.querySelector('.activity-settings'), null);
+    assert.equal(row.querySelector('.card-page-access'), null);
+  }
+
+  let prevented = false;
+  await selectors[0].emit('keydown', { key: 'ArrowDown', preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  const beta = listRow(ui, 'discover', 'beta').querySelector('.activity-select');
+  assert.equal(ui.document.activeElement, beta);
+  assert.equal(beta.tabIndex, 0);
+  assert.equal(beta.getAttribute('aria-pressed'), 'true');
+  assert.equal(inspectorDetail(ui).dataset.activityId, 'beta');
+
+  await beta.emit('keydown', { key: 'End', preventDefault() {} });
+  const gamma = listRow(ui, 'discover', 'gamma').querySelector('.activity-select');
+  assert.equal(ui.document.activeElement, gamma);
+  assert.equal(gamma.getAttribute('aria-pressed'), 'true');
+  assert.equal(inspectorDetail(ui).dataset.activityId, 'gamma');
+
+  await gamma.emit('keydown', { key: 'Home', preventDefault() {} });
+  const alpha = listRow(ui, 'discover', 'alpha').querySelector('.activity-select');
+  assert.equal(ui.document.activeElement, alpha);
+  assert.equal(alpha.getAttribute('aria-pressed'), 'true');
+  assert.equal(inspectorDetail(ui).dataset.activityId, 'alpha');
+});
+
+test('Selecting an Activity opens its details and closing returns focus to the catalog', async () => {
+  const ui = await createLibrary({ catalog: { activities: simpleCatalogEntries() }, narrow: true });
+  const inspector = ui.elements.get('activity-inspector');
+  const betaRow = listRow(ui, 'discover', 'beta');
+  const betaButton = betaRow.querySelector('.activity-select');
+  await betaButton.emit('click');
+  assert.equal(inspector.classList.contains('is-open'), true);
+  assert.equal(inspectorDetail(ui).dataset.activityId, 'beta');
+  assert.equal(ui.document.activeElement, inspectorDetail(ui).querySelector('.inspector-name'));
+
+  await ui.elements.get('inspector-close').emit('click');
+  assert.equal(inspector.classList.contains('is-open'), false);
+  assert.equal(ui.document.activeElement, betaButton);
+});
+
+test('Full-width details retain filters on Escape and restore the catalog when changing sections', async () => {
+  const ui = await createLibrary({ catalog: { activities: simpleCatalogEntries() } });
+  const search = ui.elements.get('search');
+  search.value = 'beta';
+  await search.emit('input');
+  const button = listRow(ui, 'discover', 'beta').querySelector('.activity-select');
+  await button.emit('click');
+  const inspector = ui.elements.get('activity-inspector');
+  assert.equal(inspector.hidden, false);
+  assert.equal(ui.elements.get('catalog-region').hidden, true);
+  assert.equal(ui.document.activeElement, inspectorDetail(ui).querySelector('.inspector-name'));
+  let prevented = false;
+  await inspector.emit('keydown', { key: 'Escape', preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  assert.equal(inspector.hidden, true);
+  assert.equal(ui.elements.get('catalog-region').hidden, false);
+  assert.equal(search.value, 'beta');
+  assert.equal(ui.document.activeElement, button);
+  await button.emit('click');
+  await showView(ui, 'installed');
+  assert.equal(inspector.hidden, true);
+  assert.equal(ui.elements.get('catalog-region').hidden, false);
+  assert.equal(ui.elements.get('installed-view').hidden, false);
+});
+
+test('Catalog layout switching preserves selection and survives background refreshes', async () => {
+  const ui = await createLibrary({ catalog: { activities: simpleCatalogEntries() } });
+  const list = ui.elements.get('discover-list');
+  await list.children[0].querySelector('.activity-select').emit('keydown', { key: 'ArrowRight', preventDefault() {} });
+  const selected = listRow(ui, 'discover', 'beta');
+  await ui.elements.get('layout-list').emit('click');
+  await ui.poll();
+  assert.equal(ui.elements.get('library-layout').classList.contains('is-list'), true);
+  assert.equal(ui.elements.get('layout-list').getAttribute('aria-pressed'), 'true');
+  assert.equal(ui.elements.get('layout-grid').getAttribute('aria-pressed'), 'false');
+  assert.equal(listRow(ui, 'discover', 'beta'), selected);
+  assert.equal(selected.querySelector('.activity-select').getAttribute('aria-pressed'), 'true');
+  await ui.elements.get('layout-grid').emit('click');
+  assert.equal(ui.elements.get('library-layout').classList.contains('is-list'), false);
+  assert.equal(selected.querySelector('.activity-select').getAttribute('aria-pressed'), 'true');
+});
+
+test('Catalog search includes declared websites and service URLs', async () => {
+  const entries = simpleCatalogEntries();
+  entries[0].matches = ['https://playback.example.test/*'];
+  entries[1].serviceUrl = 'https://articles.example.test/';
+  const ui = await createLibrary({ catalog: { activities: entries } });
+  const search = ui.elements.get('search');
+  for (const [query, id] of [['playback.example.test', 'alpha'], ['articles.example.test', 'beta']]) {
+    search.value = query;
+    await search.emit('input');
+    assert.deepEqual(ui.elements.get('discover-list').children.map(row => row.dataset.activityId), [id]);
+  }
+});
+
+test('Activity settings and advanced management stay in the inspector alongside quick removal on cards', async () => {
+  const managed = {
+    ...record, apiVersion: 2, pageAccess: { url: true },
+    settings: [{ id: 'label', type: 'string', label: 'Label', default: 'Original' }],
+  };
+  const ui = await createLibrary({ installed: [managed], developerMode: true });
+  await showView(ui, 'installed');
+  const row = listRow(ui, 'installed', managed.id);
+  const detail = inspectorDetail(ui);
+
+  assert.equal(row.querySelectorAll('.activity-select').length, 1);
+  assert.equal(row.querySelector('.activity-select').querySelector('button'), null);
+  assert.equal(row.querySelector('.activity-quick-action').textContent, 'Remove');
+  assert.ok(row.querySelector('.activity-select'));
+  for (const selector of ['.activity-settings', '.card-page-access', '.activity-toggle-action', '.activity-remove-action', '.activity-reload-action']) {
+    assert.equal(row.querySelector(selector), null);
+  }
+  assert.ok(detail.querySelector('.activity-settings'));
+  assert.ok(detail.querySelector('.card-page-access'));
+  for (const selector of ['.activity-logs-action', '.activity-reload-action', '.activity-toggle-action', '.activity-remove-action']) {
+    assert.ok(detail.querySelector(selector), `expected inspector control ${selector}`);
+  }
+});
+
+test('quick Add switches to Remove and back without leaving filtered Discover or opening details', async () => {
+  const entry = { ...simpleCatalogEntries()[0], category: 'music' };
+  let stored = [];
+  const ui = await createLibrary({ catalog: { activities: [entry] }, async respond(message) {
+    if (message.type === 'ACTIVITY_LIBRARY_STATE') {
+      return { ok: true, result: { installed: structuredClone(stored), userScriptsPermission: true } };
+    }
+    if (message.type === 'ACTIVITY_INSTALL') {
+      stored = [{ ...message.activityPackage.metadata, enabled: true, source: { type: 'repository' } }];
+      return { ok: true, result: stored[0] };
+    }
+    if (message.type === 'ACTIVITY_REMOVE') {
+      stored = stored.filter(({ id }) => id !== message.id);
+      return { ok: true, result: {} };
+    }
+  }, downloadActivityImpl: async () => ({ metadata: entry, source: 'fixture' }) });
+  await choose(ui, 'category-filter', 'music');
+  const search = ui.elements.get('search');
+  search.value = 'alpha';
+  await search.emit('input');
+  const quickAction = () => listRow(ui, 'discover', entry.id).querySelector('.activity-quick-action');
+  assert.equal(quickAction().textContent, 'Add');
+  assert.equal(quickAction().getAttribute('aria-label'), 'Add ALPHA');
+  quickAction().focus();
+  await quickAction().emit('click');
+  assert.equal(quickAction().textContent, 'Remove');
+  assert.equal(ui.document.activeElement, quickAction());
+  assert.equal(ui.elements.get('installed-count').textContent, '1');
+  await quickAction().emit('click');
+  assert.equal(quickAction().textContent, 'Add');
+  assert.equal(ui.document.activeElement, quickAction());
+  assert.equal(ui.elements.get('installed-count').textContent, '0');
+  assert.equal(ui.elements.get('category-filter').value, 'music');
+  assert.equal(search.value, 'alpha');
+  assert.equal(ui.elements.get('discover-view').hidden, false);
+  assert.equal(ui.elements.get('activity-inspector').hidden, true);
+  assert.equal(ui.calls.filter(({ type }) => type === 'ACTIVITY_INSTALL').length, 1);
+  assert.equal(ui.calls.filter(({ type }) => type === 'ACTIVITY_REMOVE').length, 1);
+});
+
+test('installed cards offer Remove for disabled, local, bundled, and incompatible packages', async () => {
+  const entries = simpleCatalogEntries();
+  entries[2].minExtensionVersion = '99.0.0';
+  const stored = entries.map((entry, index) => ({ ...entry, enabled: false, status: 'disabled',
+    source: { type: ['local', 'bundled', 'repository'][index] } }));
+  const ui = await createLibrary({ installed: stored, catalog: { activities: entries } });
+  for (const view of ['discover', 'installed']) {
+    for (const entry of entries) {
+      const action = listRow(ui, view, entry.id).querySelector('.activity-quick-action');
+      assert.equal(action.textContent, 'Remove');
+      assert.equal(action.disabled, false);
+    }
+  }
+});
+
+test('quick Add respects compatibility and prevents repeated clicks while a download is pending', async () => {
+  const entries = simpleCatalogEntries();
+  entries[1].apiVersion = 999;
+  entries[2].minExtensionVersion = '99.0.0';
+  let rejectDownload;
+  const pending = new Promise((_, reject) => { rejectDownload = reject; });
+  let downloads = 0;
+  const ui = await createLibrary({ catalog: { activities: entries }, downloadActivityImpl: () => {
+    downloads++;
+    return pending;
+  } });
+  for (const entry of entries.slice(1)) {
+    const action = listRow(ui, 'discover', entry.id).querySelector('.activity-quick-action');
+    assert.equal(action.disabled, true);
+    assert.match(action.title, /Requires/);
+    await action.emit('click');
+  }
+  const add = listRow(ui, 'discover', 'alpha').querySelector('.activity-quick-action');
+  const adding = add.emit('click');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(add.disabled, true);
+  assert.equal(add.getAttribute('aria-busy'), 'true');
+  await add.emit('click');
+  assert.equal(downloads, 1);
+  // A background refresh must not create an enabled duplicate action.
+  ui.setInstalled([{ ...record, id: 'unrelated', status: 'detected' }]);
+  await ui.poll();
+  await new Promise(resolve => setImmediate(resolve));
+  const refreshingAdd = listRow(ui, 'discover', 'alpha').querySelector('.activity-quick-action');
+  assert.notEqual(refreshingAdd, add);
+  assert.equal(refreshingAdd.disabled, true);
+  assert.equal(refreshingAdd.getAttribute('aria-busy'), 'true');
+  await refreshingAdd.emit('click');
+  assert.equal(downloads, 1);
+  rejectDownload(new Error('Download failed'));
+  await adding;
+  const retry = listRow(ui, 'discover', 'alpha').querySelector('.activity-quick-action');
+  assert.equal(retry.disabled, false);
+  assert.equal(retry.textContent, 'Add');
+  assert.match(ui.elements.get('catalog-notice').textContent, /Download failed/);
+  assert.equal(ui.elements.get('activity-inspector').hidden, true);
+});
+
+test('quick removal keeps focus on the next Installed card and the tab when the list becomes empty', async () => {
+  let stored = simpleCatalogEntries().slice(0, 2).map(entry => ({ ...entry, source: { type: 'repository' } }));
+  const ui = await createLibrary({ installed: stored, async respond(message) {
+    if (message.type === 'ACTIVITY_LIBRARY_STATE') {
+      return { ok: true, result: { installed: structuredClone(stored), userScriptsPermission: true } };
+    }
+    if (message.type === 'ACTIVITY_REMOVE') {
+      stored = stored.filter(({ id }) => id !== message.id);
+      return { ok: true, result: {} };
+    }
+  } });
+  await showView(ui, 'installed');
+  const first = listRow(ui, 'installed', 'alpha').querySelector('.activity-quick-action');
+  first.focus();
+  await first.emit('click');
+  const next = listRow(ui, 'installed', 'beta').querySelector('.activity-quick-action');
+  assert.equal(ui.document.activeElement, next);
+  await next.emit('click');
+  assert.equal(ui.document.activeElement, ui.elements.get('tab-installed'));
+  assert.equal(ui.elements.get('activity-inspector').hidden, true);
 });
 
 test('Library tabs support click selection and standard keyboard navigation', async () => {
@@ -527,10 +1129,11 @@ test('Paused runtime snapshots remain unchanged when an Activity setting is save
   const pause = ui.elements.get('developer-pause-logs');
   pause.checked = true;
   await pause.emit('change');
-  const setting = ui.elements.get('installed-list').querySelector('input');
+  await showView(ui, 'installed');
+  const setting = ui.elements.get('inspector-content').querySelector('input');
   ui.poll();
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(ui.elements.get('installed-list').querySelector('input'), setting);
+  assert.equal(ui.elements.get('inspector-content').querySelector('input'), setting);
   setting.value = 'Saved while paused';
   ui.failState();
   await setting.emit('change');

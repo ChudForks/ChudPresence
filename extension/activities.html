@@ -8,52 +8,67 @@
     <link rel="stylesheet" href="activities.css" />
   </head>
   <body>
-    <header class="site-header">
-      <a class="brand" href="popup.html" aria-label="ChudPresence home">
+    <header class="app-header">
+      <a class="brand workspace-mark" href="popup.html" aria-label="ChudPresence home">
         <img src="icons/icon48.png" alt="" />
-        <span><strong>ChudPresence</strong><small>Activity Library</small></span>
+        <strong>ChudPresence</strong>
       </a>
-      <div class="header-status"><i id="status-dot"></i><span id="page-status" role="status">Loading installed Activities…</span></div>
+      <div class="app-utilities">
+        <a class="documentation-link" href="ACTIVITY_API_V2.md" target="_blank" rel="noopener">Documentation <span aria-hidden="true">↗</span></a>
+      </div>
     </header>
 
     <main class="shell">
-      <section class="hero">
-        <div><h1>Activity Library</h1>
-          <p>Find and manage activities for the sites you use.</p>
-        </div>
-        <button class="button secondary" id="refresh-catalog" type="button">Refresh catalog</button>
-      </section>
+      <header class="workspace-header">
+        <div class="workspace-title"><h1>Activity Library</h1><p>Install and manage Activities for your browser.</p></div>
+        <div class="workspace-actions"><button class="button secondary refresh-button" id="refresh-catalog" type="button"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 8a6 6 0 1 0 0 5M16 3v5h-5"/></svg>Refresh catalog</button><span class="muted" id="catalog-age"></span></div>
+      </header>
 
-      <nav class="tabs" role="tablist" aria-label="Activity Library sections">
-        <button class="tab is-active" id="tab-discover" role="tab" aria-selected="true" aria-controls="discover-view" data-view="discover" type="button">Discover</button>
-        <button class="tab" id="tab-installed" role="tab" aria-selected="false" aria-controls="installed-view" tabindex="-1" data-view="installed" type="button">Installed <span id="installed-count">0</span></button>
-        <button class="tab" id="tab-updates" role="tab" aria-selected="false" aria-controls="updates-view" tabindex="-1" data-view="updates" type="button">Updates <span id="update-count">0</span></button>
-        <button class="tab" id="tab-developer" role="tab" aria-selected="false" aria-controls="developer-view" tabindex="-1" data-view="developer" type="button">Developer</button>
+      <nav class="tabs" id="library-tabs" role="tablist" aria-orientation="horizontal" aria-label="Activity Library sections">
+        <button class="tab is-active" id="tab-discover" aria-label="Discover" title="Discover" role="tab" aria-selected="true" aria-controls="discover-view" data-view="discover" type="button"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="m13 7-2 4-4 2 2-4Z"/></svg><span class="nav-text">Discover</span><span class="nav-count" id="discover-count">0</span></button>
+        <button class="tab" id="tab-installed" aria-label="Installed" title="Installed" role="tab" aria-selected="false" aria-controls="installed-view" tabindex="-1" data-view="installed" type="button"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="14" height="14" rx="2"/><path d="m6 10 3 3 5-6"/></svg><span class="nav-text">Installed</span><span class="nav-count" id="installed-count">0</span></button>
+        <button class="tab" id="tab-updates" aria-label="Updates" title="Updates" role="tab" aria-selected="false" aria-controls="updates-view" tabindex="-1" data-view="updates" type="button"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 8a6 6 0 0 0-10-3L3 8m0-5v5h5m-4 4a6 6 0 0 0 10 3l3-3m0 5v-5h-5"/></svg><span class="nav-text">Updates</span><span class="nav-count" id="update-count">0</span></button>
+        <button class="tab" id="tab-developer" aria-label="Developer" title="Developer" role="tab" aria-selected="false" aria-controls="developer-view" tabindex="-1" data-view="developer" type="button"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 5-4 5 4 5m8-10 4 5-4 5m-2-12-4 14"/></svg><span class="nav-text">Developer</span></button>
       </nav>
 
+      <div class="notice library-feedback" id="library-feedback" role="status" hidden></div>
+      <div class="notice" id="catalog-notice" role="status">Connect to the GitHub catalog to discover Activities.</div>
+      <div class="library-layout" id="library-layout">
+      <div class="catalog-region" id="catalog-region">
+
       <section class="view" id="discover-view" role="tabpanel" aria-labelledby="tab-discover" tabindex="0">
-        <div class="view-heading"><h2 id="discover-title">Discover</h2><span class="muted" id="catalog-age"></span></div>
+        <h2 class="visually-hidden" id="discover-title">Discover Activities</h2>
         <div class="filters">
-          <label class="search"><span class="visually-hidden">Search Activities</span><input id="search" type="search" placeholder="Search Activities…" autocomplete="off" /></label>
+          <label class="search"><span class="visually-hidden">Search Activities</span><input id="search" type="search" placeholder="Search by name, website, or keyword" autocomplete="off" /></label>
           <label class="category-filter"><span class="visually-hidden">Filter by category</span><select id="category-filter"><option value="all">All categories</option></select></label>
+          <div class="layout-controls" role="group" aria-label="Catalog layout"><button id="layout-grid" class="layout-button is-active" type="button" aria-label="Grid view" aria-pressed="true" title="Grid view"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="5" height="5" rx="1"/><rect x="12" y="3" width="5" height="5" rx="1"/><rect x="3" y="12" width="5" height="5" rx="1"/><rect x="12" y="12" width="5" height="5" rx="1"/></svg></button><button id="layout-list" class="layout-button" type="button" aria-label="List view" aria-pressed="false" title="List view"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4h10M7 10h10M7 16h10M3 4h.01M3 10h.01M3 16h.01"/></svg></button></div>
         </div>
-        <div class="notice" id="catalog-notice" role="status">Connect to the GitHub catalog to discover Activities.</div>
-        <div class="card-grid" id="discover-list"></div>
+        <div class="list-heading"><span id="discover-results" role="status"></span><span class="keyboard-hint"><kbd>↑</kbd><kbd>↓</kbd> Select <kbd>Enter</kbd> Details</span></div>
+        <div class="activity-list" id="discover-list" aria-label="Discover Activities"></div>
+        <p class="list-help">Add or remove Activities here. Select a card to review its details and access.</p>
       </section>
 
       <section class="view" id="installed-view" role="tabpanel" aria-labelledby="tab-installed" tabindex="0" hidden>
-        <div class="view-heading"><h2 id="installed-title">Installed</h2></div>
-        <div class="card-grid" id="installed-list"></div>
+        <div class="view-heading">
+          <div><h2 id="installed-title">Installed Activities</h2><p class="view-description">Configure settings, enable or disable Activities, and remove packages.</p></div>
+          <span class="view-tag">This browser</span>
+        </div>
+        <div class="activity-list" id="installed-list" aria-label="Installed Activities"></div>
+        <p class="list-help">Select an Activity to configure or enable it, or remove it directly from its card.</p>
       </section>
 
       <section class="view" id="updates-view" role="tabpanel" aria-labelledby="tab-updates" tabindex="0" hidden>
-        <div class="view-heading"><h2 id="updates-title">Updates</h2></div>
-        <div class="card-grid" id="updates-list"></div>
+        <div class="view-heading">
+          <div><h2 id="updates-title">Activity updates</h2><p class="view-description">Review new versions and their access requirements before updating.</p></div>
+        </div>
+        <div class="activity-list" id="updates-list" aria-label="Activity updates"></div>
       </section>
 
       <section class="view" id="developer-view" role="tabpanel" aria-labelledby="tab-developer" tabindex="0" hidden>
-        <div class="view-heading"><h2 id="developer-title">Developer Mode</h2></div>
-        <label class="developer-toggle"><span><strong>Enable developer tools</strong><small>Show Activity logs and local package loading on this browser.</small></span><input id="developer-enabled" type="checkbox" /></label>
+        <div class="view-heading">
+          <div><h2 id="developer-title">Developer tools</h2><p class="view-description">Inspect diagnostics, test local packages, and reload Activities.</p></div>
+        </div>
+        <label class="developer-toggle"><span><strong>Enable developer tools</strong><small>Show Activity logs and local package loading on this browser.</small></span><input class="switch-control" id="developer-enabled" type="checkbox" /></label>
         <div class="developer-panel" id="developer-panel" hidden>
           <section class="developer-console" aria-labelledby="developer-logs-title">
             <div class="console-heading"><div><h3 id="developer-logs-title">Activity logs</h3><p>Choose an Activity to inspect its logs, network requests, and playback diagnostics.</p></div><span class="console-count" id="developer-log-count">0 entries</span></div>
@@ -70,12 +85,14 @@
             <div class="console-footer"><span class="muted" id="developer-log-update">Updates every 3 seconds. Selecting text holds the view.</span><span class="console-feedback" id="developer-log-status" role="status" aria-live="polite"></span></div>
             <p class="console-help">Clear history starts a fresh testing session for the selected Activity. New entries continue to arrive while playback runs.</p>
           </section>
-          <h3>Load a local Activity</h3>
+          <section class="local-package" aria-labelledby="local-package-title">
+          <h3 id="local-package-title">Load a local Activity</h3>
           <p>Select an Activity's <code>metadata.json</code> and <code>activity.js</code> together. Add <code>icon.png</code> if its metadata declares an icon. Local Activities stay on this device.</p>
           <label class="file-picker">Activity files<input id="local-files" type="file" accept=".json,.js,.png,application/json,text/javascript,image/png" multiple /></label>
           <div class="selected-files" id="selected-files">Choose both required files to continue.</div>
           <button class="button primary" id="load-local" type="button" disabled>Load local Activity</button>
           <div class="notice" id="developer-notice" role="status"></div>
+          </section>
         </div>
         <div class="developer-guide">
           <h3>Activity API v2</h3>
@@ -85,9 +102,15 @@
       </section>
 
     <footer class="trust-note">
-      <strong>Review before installing</strong>
-      <span>Activities can read pages on the sites you approve. They run separately from ChudPresence and Discord credentials; each Activity report is checked by the extension.</span>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22s8-3.7 8-10V5l-8-3-8 3v7c0 6.3 8 10 8 10Z"/><path d="m8.5 12 2.2 2.2 4.8-5"/></svg>
+      <div><strong>Review before installing</strong><p>Activities can read pages on the sites you approve. V2 uses a sandbox with declared page access. V1 runs as trusted code. Activity reports are checked by the extension.</p></div>
     </footer>
+      </div>
+      <aside class="inspector" id="activity-inspector" aria-labelledby="inspector-title" hidden>
+        <div class="inspector-heading"><button class="inspector-close" id="inspector-close" type="button"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m9 4-6 6 6 6M3 10h14"/></svg>Back to Activities</button><span id="inspector-title">Activity details</span><span class="keyboard-hint"><kbd>Esc</kbd> Back</span></div>
+        <div id="inspector-content"><div class="inspector-empty"><h2>Select an Activity</h2><p>Its details, access requirements, and controls appear here.</p></div></div>
+      </aside>
+      </div>
     </main>
 
     <dialog class="user-scripts-dialog" id="user-scripts-dialog" aria-labelledby="user-scripts-title">
