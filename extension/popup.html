@@ -57,26 +57,8 @@
           <span class="line"></span>
           <span><i class="connection-dot" id="discord-dot"></i>Discord</span>
         </div>
-      </section>
-
-      <section class="services-section" aria-labelledby="services-title">
-        <div class="section-heading">
-          <div><span class="eyebrow">Sources</span><h2 id="services-title">Services</h2></div>
-          <button class="text-button" id="manage-services" type="button">Manage</button>
-        </div>
-        <div class="service-grid"></div>
-      </section>
-
-      <section class="discord-card">
-        <img src="assets/services/discord.svg" alt="" />
-        <span><strong id="discord-title">Connect Discord</strong><small id="hint" role="status">Share what you're watching or listening to.</small></span>
-        <button id="discord-action" type="button"><span>Connect</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7 4 6 6-6 6"/></svg></button>
-      </section>
-
-      <section class="local-diagnostics" aria-label="Local playback diagnostics">
-        <a class="library-link" href="activities.html" target="_blank" rel="noopener">Open Activity Library <span aria-hidden="true">↗</span></a>
-        <details>
-          <summary>Local playback diagnostics</summary>
+        <details class="local-diagnostics">
+          <summary>Local playback diagnostics<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></summary>
           <dl>
             <div><dt>Visibility</dt><dd id="local-visibility">Unknown</dd></div>
             <div><dt>Playback</dt><dd id="local-playback">No report</dd></div>
@@ -89,11 +71,25 @@
         </details>
       </section>
 
-      <button class="settings-cta" id="open-settings" type="button">
-        <span class="cta-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.86 2.86-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21H9.55v-.1A1.7 1.7 0 0 0 8.5 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.86-2.86.06-.06A1.7 1.7 0 0 0 4.1 15a1.7 1.7 0 0 0-1.1-1 1.7 1.7 0 0 0-1.1-.4H2V9.55h.1A1.7 1.7 0 0 0 4.1 8.5a1.7 1.7 0 0 0-.34-1.88l-.06-.06L6.56 3.7l.06.06A1.7 1.7 0 0 0 8.5 4.1a1.7 1.7 0 0 0 1-1.1 1.7 1.7 0 0 0 .4-1.1V2h4.05v.1A1.7 1.7 0 0 0 15 4.1a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.86 2.86-.06.06A1.7 1.7 0 0 0 19.4 8.5a1.7 1.7 0 0 0 1.1 1 1.7 1.7 0 0 0 1.1.4h.1v4.05h-.1a1.7 1.7 0 0 0-2.2 1.05Z"/></svg></span>
-        <span><strong>Personalize your presence</strong><small>Activity artwork, timers, buttons, and more</small></span>
-        <svg class="chevron" viewBox="0 0 20 20" aria-hidden="true"><path d="m7 4 6 6-6 6"/></svg>
-      </button>
+      <section class="services-section" aria-labelledby="services-title">
+        <div class="section-heading">
+          <div><span class="eyebrow">Sources</span><h2 id="services-title">Services</h2></div>
+          <button class="text-button" id="manage-services" type="button">Manage</button>
+        </div>
+        <div class="service-grid"></div>
+      </section>
+
+      <section class="discord-card">
+        <img src="assets/services/discord.png" alt="" />
+        <span><strong id="discord-title">Connect Discord</strong><small id="hint" role="status">Share what you're watching or listening to.</small></span>
+        <button id="discord-action" type="button"><span>Connect</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7 4 6 6-6 6"/></svg></button>
+      </section>
+
+      <a class="library-card" href="activities.html" target="_blank" rel="noopener">
+        <span class="library-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6v14M8 6v14M12 6v14m4-16 4 16"/></svg></span>
+        <span class="library-copy"><strong>Activity Library</strong><small>Discover and manage Activities</small></span>
+        <span class="library-action">Open<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7 4 6 6-6 6"/></svg></span>
+      </a>
     </main>
 
     <main class="panel-view settings-view" id="settings-view" aria-labelledby="settings-title" hidden>
@@ -110,7 +106,7 @@
             <span class="toggle"><input id="enabled" name="enabled" type="checkbox" /><i></i></span>
           </label>
           <div class="setting-row connection-setting">
-            <span class="setting-icon"><img src="assets/services/discord.svg" alt="" /></span>
+            <span class="setting-icon"><img src="assets/services/discord.png" alt="" /></span>
             <span class="setting-copy"><strong>Discord connection</strong><small id="discord-status">Not connected</small></span>
             <button class="small-action" id="settings-discord-action" type="button">Connect</button>
           </div>

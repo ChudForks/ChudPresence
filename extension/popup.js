@@ -469,12 +469,6 @@ settingsTab.addEventListener('click', () => {
     setSaveFeedback('error', error.message || 'Could not refresh installed Activities.');
   });
 });
-document.getElementById('open-settings').addEventListener('click', () => {
-  showView('settings');
-  refreshInstalledActivities().catch((error) => {
-    setSaveFeedback('error', error.message || 'Could not refresh installed Activities.');
-  });
-});
 document.getElementById('manage-services').addEventListener('click', () => {
   showView('settings');
   const firstService = document.querySelector('.service-settings-card');
