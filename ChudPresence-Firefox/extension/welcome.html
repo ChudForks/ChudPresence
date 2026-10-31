@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>Welcome to ChudPresence</title>
+    <link rel="stylesheet" href="activities.css" />
+    <link rel="stylesheet" href="welcome.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <a class="brand" href="popup.html"><img src="icons/icon48.png" alt="" /><strong>ChudPresence</strong></a>
+      <a class="documentation-link" href="activities.html">Activity Library <span aria-hidden="true">↗</span></a>
+    </header>
+    <main class="setup-shell">
+      <header class="setup-intro">
+        <span class="setup-eyebrow">GET STARTED</span>
+        <h1>Your browser activity,<br />on your Discord profile.</h1>
+        <p>First, let’s get your first Activity running. You choose which websites to add and when to connect Discord.</p>
+      </header>
+      <p class="setup-feedback" id="setup-feedback" role="status" aria-live="polite">Checking your setup…</p>
+      <ol class="setup-steps" aria-label="Setup steps">
+        <li class="setup-step" id="permission-step">
+          <span class="step-number" aria-hidden="true">1</span>
+          <div class="step-content">
+            <div class="step-heading"><h2>Enable Activities</h2><span class="step-state" id="permission-state">Required</span></div>
+            <p>An <strong>Activity</strong> teaches ChudPresence how to detect what you’re watching or listening to on a website.</p>
+            <p>Click below to request Firefox’s <strong>User Scripts</strong> permission. In the Firefox prompt, review the warning, select <strong>“Allow unverified third-party scripts to access your data”</strong>, then choose <strong>Allow</strong>. This lets the Activities you install run on websites you approve.</p>
+            <p class="step-hint">Your Services list is empty until this is enabled. The included YouTube Activity will be added automatically.</p>
+            <button class="button primary" id="enable-activities" type="button" disabled>Checking permission…</button>
+          </div>
+        </li>
+        <li class="setup-step" id="activity-step">
+          <span class="step-number" aria-hidden="true">2</span>
+          <div class="step-content">
+            <div class="step-heading"><h2>Try your first Activity</h2><span class="step-state" id="activity-state">Next</span></div>
+            <p id="activity-description">YouTube is included, so you can try it without downloading anything else. Enable Activities above to get it ready.</p>
+            <p>Play a YouTube video, then click ChudPresence in Firefox’s Extensions menu (the puzzle piece) to see your <strong>Local presence preview</strong>. Existing tabs are detected automatically; reload the video’s tab if it stays blank.</p>
+            <div class="step-actions"><button class="button secondary" id="try-youtube" type="button" disabled>Open YouTube</button><a href="activities.html">Browse more Activities</a></div>
+            <p class="step-hint">In the Library, choose <strong>Refresh catalog</strong> and approve catalog access. Install an Activity for each site you use, reviewing its requested website access.</p>
+          </div>
+        </li>
+        <li class="setup-step" id="discord-step">
+          <span class="step-number" aria-hidden="true">3</span>
+          <div class="step-content">
+            <div class="step-heading"><h2>Connect Discord</h2><span class="step-state" id="discord-state">Optional</span></div>
+            <p>Sign in to Discord to share detected activity on your profile. You can try the local preview first and connect later from the ChudPresence popup.</p>
+            <button class="button secondary" id="connect-discord" type="button" disabled>Checking connection…</button>
+            <p class="step-hint" id="discord-feedback" role="status" aria-live="polite"></p>
+          </div>
+        </li>
+      </ol>
+      <footer class="setup-footer">
+        <div><strong id="finish-title">Ready when you are.</strong><p id="finish-description">Enable Activities to finish. Discord can wait.</p></div>
+        <div class="step-actions"><button class="button primary" id="finish-setup" type="button" disabled>Finish setup</button><a href="activities.html">Set up later</a></div>
+        <p class="step-hint">You can reopen this guide from the popup’s Settings or the Activity Library.</p>
+      </footer>
+      <noscript>This guide needs JavaScript to check your extension setup. Reload this page to try again.</noscript>
+    </main>
+    <script type="module" src="welcome.js"></script>
+  </body>
+</html>

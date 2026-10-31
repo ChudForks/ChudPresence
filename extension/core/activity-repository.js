@@ -1,0 +1,434 @@
+import {
+  isSupportedActivityApiVersion,
+  MAX_ACTIVITY_SOURCE_BYTES,
+  isActivityId,
+  isSemanticVersion,
+  validateMatchPattern,
+  validateActivityMetadata,
+  validateActivitySource,
+} from './activity-validator.js';
+import { ACTIVITY_KIND_VALUES } from './activity-contract.generated.js';
+import { MAX_ACTIVITY_ICON_BYTES, MAX_ACTIVITY_METADATA_BYTES } from './activity-contract.generated.js';
+import { validateActivityV2PageAccess } from './activity-v2-page.js';
+
+export const ACTIVITY_REPOSITORIES = Object.freeze([
+  'ChudPresence-Activities',
+  'ChudPresence-Activities-V2',
+].map((name) => Object.freeze({
+  owner: 'ChudForks',
+  name,
+  branch: 'main',
+  baseUrl: `https://raw.githubusercontent.com/ChudForks/${name}/main/`,
+  rawBaseUrl: `https://raw.githubusercontent.com/ChudForks/${name}/`,
+  apiBaseUrl: `https://api.github.com/repos/ChudForks/${name}/`,
+  catalogPath: 'catalog.json',
+})));
+
+export const ACTIVITY_REPOSITORY = ACTIVITY_REPOSITORIES[0];
+
+function repositoryId(repository) {
+  return `${repository.owner}/${repository.name}`;
+}
+
+export function getActivityRepository(id) {
+  return ACTIVITY_REPOSITORIES.find((repository) => repositoryId(repository) === id);
+}
+
+function validRevision(value) {
+  return typeof value === 'string' && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(value);
+}
+
+function validCatalogSource(source) {
+  return source && getActivityRepository(source.repository) && validRevision(source.revision);
+}
+
+function catalogSources(catalog) {
+  return catalog?.sources || (validRevision(catalog?.revision)
+    ? [{ repository: repositoryId(ACTIVITY_REPOSITORY), revision: catalog.revision }]
+    : []);
+}
+
+const CATALOG_CACHE_KEY = 'activityCatalogCache';
+const CATALOG_FETCHED_KEY = 'activityCatalogFetchedAt';
+const MAX_CATALOG_BYTES = 1024 * 1024;
+const MAX_METADATA_BYTES = MAX_ACTIVITY_METADATA_BYTES;
+const MAX_ICON_BYTES = MAX_ACTIVITY_ICON_BYTES;
+const DEFAULT_MEDIA_KINDS = new Set(ACTIVITY_KIND_VALUES);
+
+function extensionApi() {
+  return globalThis.browser || globalThis.chrome;
+}
+
+function safeRepositoryPath(path, activityId, filename) {
+  return typeof path === 'string' && path === `activities/${activityId}/${filename}`;
+}
+
+function validStringList(value, maxItems, maxLength, pattern = null) {
+  return Array.isArray(value) && value.length <= maxItems && new Set(value).size === value.length &&
+    value.every((item) => typeof item === 'string' && item.trim() === item && item.length > 0 &&
+      item.length <= maxLength && (!pattern || pattern.test(item)));
+}
+
+function validHttpsUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && Boolean(url.hostname) && !url.username && !url.password;
+  } catch {
+    return false;
+  }
+}
+
+function canonicalJson(value) {
+  return JSON.stringify(value, (_key, nested) => {
+    if (!nested || typeof nested !== 'object' || Array.isArray(nested)) return nested;
+    return Object.fromEntries(Object.keys(nested).sort().map((key) => [key, nested[key]]));
+  });
+}
+
+export function validateCatalog(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || value.schemaVersion !== 1 ||
+      !Array.isArray(value.activities) || value.activities.length > 2000) {
+    throw new Error('The Activities repository catalog has an unsupported format.');
+  }
+  if (value.revision !== undefined && !validRevision(value.revision)) {
+    throw new Error('The Activities repository catalog has an invalid repository revision.');
+  }
+  if (value.sources !== undefined && (!Array.isArray(value.sources) ||
+      value.sources.length > ACTIVITY_REPOSITORIES.length ||
+      !value.sources.every(validCatalogSource) ||
+      new Set(value.sources.map((source) => source.repository)).size !== value.sources.length)) {
+    throw new Error('The Activities catalog has invalid repository sources.');
+  }
+  const seen = new Set();
+  for (const entry of value.activities) {
+    if (!entry || typeof entry !== 'object' || !isActivityId(entry.id) || seen.has(entry.id)) {
+      throw new Error('The Activities repository catalog contains an invalid or duplicate entry.');
+    }
+    seen.add(entry.id);
+    if ((entry.catalogSource !== undefined && !validCatalogSource(entry.catalogSource)) ||
+        (value.sources !== undefined && !value.sources.some((source) =>
+          source.repository === entry.catalogSource?.repository && source.revision === entry.catalogSource?.revision))) {
+      throw new Error(`The catalog entry for ${entry.id} has an invalid repository source.`);
+    }
+    if (!safeRepositoryPath(entry.metadata, entry.id, 'metadata.json') ||
+        !safeRepositoryPath(entry.entry, entry.id, 'activity.js') ||
+        !/^[a-f0-9]{64}$/i.test(entry.metadataSha256 || '') ||
+        !/^[a-f0-9]{64}$/i.test(entry.sha256 || '')) {
+      throw new Error(`The catalog entry for ${entry.id} has invalid paths or integrity hashes.`);
+    }
+    if (typeof entry.name !== 'string' || typeof entry.description !== 'string' ||
+        typeof entry.version !== 'string' || !Number.isInteger(entry.apiVersion) || entry.apiVersion < 1 ||
+        entry.name.length > 80 || entry.description.length > 500 ||
+        !isSemanticVersion(entry.version) ||
+        !Array.isArray(entry.matches) || entry.matches.length < 1 || entry.matches.length > 32 ||
+        new Set(entry.matches).size !== entry.matches.length || !entry.matches.every(validateMatchPattern)) {
+      throw new Error(`The catalog entry for ${entry.id} is missing required display or API fields.`);
+    }
+    if (entry.minExtensionVersion !== undefined && !isSemanticVersion(entry.minExtensionVersion)) {
+      throw new Error(`The catalog entry for ${entry.id} has an invalid minimum extension version.`);
+    }
+    if (entry.apiVersion === 2) {
+      try { validateActivityV2PageAccess(entry.pageAccess); }
+      catch { throw new Error(`The catalog entry for ${entry.id} has invalid page access declarations.`); }
+    }
+    if (entry.network !== undefined &&
+        (!Array.isArray(entry.network) || entry.network.length > 32 ||
+         new Set(entry.network).size !== entry.network.length ||
+         !entry.network.every(validateMatchPattern) ||
+         entry.network.some((pattern) => /^(?:https:\/\/)(?:\*\.)?(?:[^/]*\.)?(?:discord\.com|discordapp\.com|discordapp\.net)\//i.test(pattern)))) {
+      throw new Error(`The catalog entry for ${entry.id} has invalid network permissions.`);
+    }
+    if (entry.category !== undefined &&
+        (typeof entry.category !== 'string' || !/^[a-z][a-z0-9-]{0,31}$/.test(entry.category))) {
+      throw new Error(`The catalog entry for ${entry.id} has an invalid category.`);
+    }
+    if (entry.defaultMediaKind !== undefined &&
+        !DEFAULT_MEDIA_KINDS.has(entry.defaultMediaKind)) {
+      throw new Error(`The catalog entry for ${entry.id} has an invalid default media kind.`);
+    }
+    if (entry.settingsUi !== undefined) {
+      const ui = entry.settingsUi;
+      const labels = ui?.statusLabels;
+      if (!ui || typeof ui !== 'object' || Array.isArray(ui) ||
+          Object.keys(ui).some((key) => key !== 'statusLabels') ||
+          (labels !== undefined && (!labels || typeof labels !== 'object' || Array.isArray(labels) ||
+            Object.entries(labels).some(([key, value]) =>
+              !['app', 'artist', 'track'].includes(key) || typeof value !== 'string' ||
+              !value.trim() || value.length > 80)))) {
+        throw new Error(`The catalog entry for ${entry.id} has invalid settings UI labels.`);
+      }
+    }
+    if (entry.author !== undefined &&
+        (!entry.author || typeof entry.author !== 'object' || Array.isArray(entry.author) ||
+         typeof entry.author.name !== 'string' || !entry.author.name.trim() || entry.author.name.length > 80 ||
+         Object.keys(entry.author).some((key) => !['name', 'url'].includes(key)) ||
+         (entry.author.url !== undefined && !validHttpsUrl(entry.author.url)))) {
+      throw new Error(`The catalog entry for ${entry.id} has an invalid author.`);
+    }
+    if (entry.aliases !== undefined && !validStringList(entry.aliases, 32, 80)) {
+      throw new Error(`The catalog entry for ${entry.id} has invalid aliases.`);
+    }
+    if (entry.tags !== undefined && !validStringList(entry.tags, 32, 32, /^[a-z0-9][a-z0-9-]{0,31}$/)) {
+      throw new Error(`The catalog entry for ${entry.id} has invalid tags.`);
+    }
+    if (entry.excludeMatches !== undefined &&
+        (!Array.isArray(entry.excludeMatches) || entry.excludeMatches.length > 32 ||
+         new Set(entry.excludeMatches).size !== entry.excludeMatches.length || !entry.excludeMatches.every(validateMatchPattern))) {
+      throw new Error(`The catalog entry for ${entry.id} has invalid excludeMatches.`);
+    }
+    if (entry.contributors !== undefined &&
+        (!Array.isArray(entry.contributors) || entry.contributors.length > 16 || entry.contributors.some((person) =>
+          !person || typeof person !== 'object' || Array.isArray(person) || typeof person.name !== 'string' ||
+          !person.name.trim() || person.name.length > 80 || Object.keys(person).some((key) => !['name', 'url'].includes(key)) ||
+          (person.url !== undefined && !validHttpsUrl(person.url))))) {
+      throw new Error(`The catalog entry for ${entry.id} has invalid contributors.`);
+    }
+    for (const field of ['serviceUrl', 'homepage', 'repository']) {
+      if (entry[field] !== undefined && !validHttpsUrl(entry[field])) {
+        throw new Error(`The catalog entry for ${entry.id} has an invalid ${field}.`);
+      }
+    }
+    if ((entry.icon === undefined && entry.iconSha256 !== undefined) ||
+        (entry.icon !== undefined &&
+         (!safeRepositoryPath(entry.icon, entry.id, 'icon.png') || !/^[a-f0-9]{64}$/i.test(entry.iconSha256 || '')))) {
+      throw new Error(`The catalog entry for ${entry.id} has an invalid icon path or integrity hash.`);
+    }
+  }
+  return value;
+}
+
+function repositoryUrl(path, baseUrl) {
+  const url = new URL(path, baseUrl);
+  const base = new URL(baseUrl);
+  if (!ACTIVITY_REPOSITORIES.some((repository) => base.href.startsWith(repository.rawBaseUrl)) ||
+      url.origin !== base.origin || !url.pathname.startsWith(base.pathname) || url.search || url.hash) {
+    throw new Error('Activity repository path is outside the configured repository.');
+  }
+  return url;
+}
+
+async function responseText(path, maxBytes, baseUrl) {
+  const url = repositoryUrl(path, baseUrl);
+  const response = await fetch(url, {
+    cache: 'no-store',
+    credentials: 'omit',
+    redirect: 'error',
+    headers: { Accept: 'application/json, text/plain;q=0.9' },
+  });
+  if (!response.ok) throw new Error(`Activity repository returned HTTP ${response.status}.`);
+  const declaredSize = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declaredSize) && declaredSize > maxBytes) throw new Error('Repository file exceeds its size limit.');
+  const text = await response.text();
+  if (new TextEncoder().encode(text).byteLength > maxBytes) throw new Error('Repository file exceeds its size limit.');
+  return text;
+}
+
+async function responseBytes(path, maxBytes, baseUrl) {
+  const url = repositoryUrl(path, baseUrl);
+  const response = await fetch(url, {
+    cache: 'no-store',
+    credentials: 'omit',
+    redirect: 'error',
+    headers: { Accept: 'image/png' },
+  });
+  if (!response.ok) throw new Error(`Activity repository returned HTTP ${response.status}.`);
+  const declaredSize = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declaredSize) && declaredSize > maxBytes) throw new Error('Repository icon exceeds its size limit.');
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (bytes.byteLength > maxBytes) throw new Error('Repository icon exceeds its size limit.');
+  return bytes;
+}
+
+async function sha256(value) {
+  const input = typeof value === 'string' ? new TextEncoder().encode(value) : value;
+  const bytes = await crypto.subtle.digest('SHA-256', input);
+  return [...new Uint8Array(bytes)].map((value) => value.toString(16).padStart(2, '0')).join('');
+}
+
+async function repositoryRevision(repository) {
+  const response = await fetch(new URL(`commits/${repository.branch}`, repository.apiBaseUrl), {
+    cache: 'no-store',
+    credentials: 'omit',
+    redirect: 'error',
+    headers: { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' },
+  });
+  if (!response.ok) throw new Error(`Could not resolve the Activities repository revision (HTTP ${response.status}).`);
+  const result = await response.json();
+  if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(result?.sha || '')) {
+    throw new Error('The Activities repository returned an invalid commit revision.');
+  }
+  return result.sha.toLowerCase();
+}
+
+function bytesToBase64(bytes) {
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  }
+  return btoa(binary);
+}
+
+function storageApi() {
+  const storage = extensionApi()?.storage?.local;
+  if (!storage) throw new Error('Extension storage is unavailable.');
+  return storage;
+}
+
+export async function readCatalogCache() {
+  const result = await storageApi().get([CATALOG_CACHE_KEY, CATALOG_FETCHED_KEY]);
+  const catalog = result[CATALOG_CACHE_KEY];
+  if (!catalog) return { catalog: null, fetchedAt: 0 };
+  try {
+    return { catalog: validateCatalog(catalog), fetchedAt: Number(result[CATALOG_FETCHED_KEY]) || 0 };
+  } catch {
+    return { catalog: null, fetchedAt: 0 };
+  }
+}
+
+export async function fetchCatalog({ force = false } = {}) {
+  const cached = await readCatalogCache();
+  if (!force && cached.catalog?.sources?.length === ACTIVITY_REPOSITORIES.length) {
+    return { ...cached, fromCache: true, warnings: [] };
+  }
+  const results = await Promise.allSettled(ACTIVITY_REPOSITORIES.map(async (repository) => {
+    const revision = await repositoryRevision(repository);
+    const immutableBase = `${repository.rawBaseUrl}${revision}/`;
+    const text = await responseText(repository.catalogPath, MAX_CATALOG_BYTES, immutableBase);
+    const catalog = validateCatalog({ ...JSON.parse(text), revision });
+    const source = { repository: repositoryId(repository), revision };
+    return { source, activities: catalog.activities.map((entry) => ({ ...entry, catalogSource: source })) };
+  }));
+  const sources = [];
+  const activities = new Map();
+  const warnings = [];
+  for (const [index, result] of results.entries()) {
+    const id = repositoryId(ACTIVITY_REPOSITORIES[index]);
+    let sourceCatalog;
+    if (result.status === 'fulfilled') {
+      sourceCatalog = result.value;
+    } else {
+      const source = catalogSources(cached.catalog).find((source) => source.repository === id);
+      warnings.push(`Could not refresh ${id}. ${source ? 'Using its cached Activities. ' : ''}${result.reason.message}`);
+      if (!source) continue;
+      sourceCatalog = { source, activities: cached.catalog.activities
+        .filter((entry) => (entry.catalogSource?.repository || repositoryId(ACTIVITY_REPOSITORY)) === id)
+        .map((entry) => ({ ...entry, catalogSource: source })) };
+    }
+    sources.push(sourceCatalog.source);
+    // Activity IDs are shared across the library. Prefer the V2 repository on a collision.
+    for (const entry of sourceCatalog.activities) activities.set(entry.id, entry);
+  }
+  if (results.every((result) => result.status === 'rejected')) throw new Error(warnings.join(' '));
+  const catalog = validateCatalog({ schemaVersion: 1, sources, activities: [...activities.values()] });
+  const fetchedAt = Date.now();
+  await storageApi().set({
+    [CATALOG_CACHE_KEY]: catalog,
+    [CATALOG_FETCHED_KEY]: fetchedAt,
+  });
+  return { catalog, fetchedAt, fromCache: false, warnings };
+}
+
+export function activityCatalogIconUrl({ id, icon, catalogSource }) {
+  if (!isActivityId(id) || !safeRepositoryPath(icon, id, 'icon.png')) return '';
+  if (catalogSource !== undefined && !validCatalogSource(catalogSource)) return '';
+  const repository = catalogSource ? getActivityRepository(catalogSource.repository) : ACTIVITY_REPOSITORY;
+  const baseUrl = catalogSource ? `${repository.rawBaseUrl}${catalogSource.revision}/` : repository.baseUrl;
+  return new URL(icon, baseUrl).href;
+}
+
+export async function downloadActivity(activityId, catalog) {
+  const entry = catalog?.activities?.find((item) => item.id === activityId);
+  if (!entry) throw new Error(`Activity ${activityId} is not present in the catalog.`);
+  if (entry.catalogSource !== undefined && !validCatalogSource(entry.catalogSource)) {
+    throw new Error('Activity catalog does not identify a valid repository source.');
+  }
+  const repository = entry.catalogSource ? getActivityRepository(entry.catalogSource.repository) : ACTIVITY_REPOSITORY;
+  const revision = entry.catalogSource?.revision || catalog.revision || await repositoryRevision(repository);
+  if (!validRevision(revision)) {
+    throw new Error('Activity catalog does not identify a valid repository revision.');
+  }
+  const immutableBase = `${repository.rawBaseUrl}${revision}/`;
+  const [metadataText, source, iconBytes] = await Promise.all([
+    responseText(entry.metadata, MAX_METADATA_BYTES, immutableBase),
+    responseText(entry.entry, MAX_ACTIVITY_SOURCE_BYTES, immutableBase),
+    entry.icon ? responseBytes(entry.icon, MAX_ICON_BYTES, immutableBase) : Promise.resolve(null),
+  ]);
+  if (await sha256(metadataText) !== entry.metadataSha256.toLowerCase()) {
+    throw new Error('Activity metadata integrity check failed.');
+  }
+  if (await sha256(source) !== entry.sha256.toLowerCase()) {
+    throw new Error('Activity code integrity check failed.');
+  }
+  if (iconBytes && await sha256(iconBytes) !== entry.iconSha256.toLowerCase()) {
+    throw new Error('Activity icon integrity check failed.');
+  }
+  let metadata;
+  let packageMetadata;
+  try {
+    packageMetadata = JSON.parse(metadataText);
+    metadata = validateActivityMetadata(packageMetadata);
+  } catch (error) {
+    throw new Error(`Activity metadata is invalid: ${error.message}`);
+  }
+  validateActivitySource(source);
+  const comparableFields = ['name', 'description', 'version', 'apiVersion', 'minExtensionVersion', 'matches',
+    'category', 'aliases', 'tags', 'excludeMatches', 'author', 'contributors',
+    'serviceUrl', 'homepage', 'repository', 'presence', 'defaultMediaKind',
+    'frames', 'network', 'settings', 'settingsUi', 'pageAccess'];
+  const mismatch = comparableFields.find((field) =>
+    canonicalJson(packageMetadata[field]) !== canonicalJson(entry[field]));
+  if (!isSupportedActivityApiVersion(metadata.apiVersion) || metadata.id !== entry.id ||
+      mismatch || Boolean(metadata.icon) !== Boolean(iconBytes)) {
+    const field = metadata.id !== entry.id ? 'id' : mismatch || 'icon or API version';
+    const error = new Error(`Activity metadata does not match its catalog entry (${field}). Refresh the catalog and try again.`);
+    error.code = 'catalog_metadata_mismatch';
+    throw error;
+  }
+  const icon = iconBytes ? `data:image/png;base64,${bytesToBase64(iconBytes)}` : undefined;
+  return {
+    metadata,
+    metadataSource: metadataText,
+    source,
+    ...(icon ? { icon } : {}),
+    sourceType: 'repository',
+    provenance: {
+      repository: repositoryId(repository),
+      revision: revision.toLowerCase(),
+      codeSha256: entry.sha256.toLowerCase(),
+      metadataSha256: entry.metadataSha256.toLowerCase(),
+      ...(iconBytes ? { iconSha256: entry.iconSha256.toLowerCase() } : {}),
+    },
+  };
+}
+
+export function compareActivityVersions(left, right) {
+  const parse = (version) => {
+    const match = String(version).match(/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[^+]+)?$/);
+    return match && {
+      core: match.slice(1, 4).map((part) => BigInt(part)),
+      prerelease: match[4] ? match[4].split('.') : null,
+    };
+  };
+  const a = parse(left);
+  const b = parse(right);
+  if (!a || !b) return String(left).localeCompare(String(right));
+  for (let index = 0; index < 3; index += 1) {
+    if (a.core[index] !== b.core[index]) return a.core[index] < b.core[index] ? -1 : 1;
+  }
+  if (!a.prerelease && !b.prerelease) return 0;
+  if (!a.prerelease) return 1;
+  if (!b.prerelease) return -1;
+  const count = Math.max(a.prerelease.length, b.prerelease.length);
+  for (let index = 0; index < count; index += 1) {
+    if (a.prerelease[index] === undefined) return -1;
+    if (b.prerelease[index] === undefined) return 1;
+    if (a.prerelease[index] === b.prerelease[index]) continue;
+    const aNumeric = /^\d+$/.test(a.prerelease[index]);
+    const bNumeric = /^\d+$/.test(b.prerelease[index]);
+    if (aNumeric && bNumeric) return BigInt(a.prerelease[index]) < BigInt(b.prerelease[index]) ? -1 : 1;
+    if (aNumeric !== bNumeric) return aNumeric ? -1 : 1;
+    // SemVer uses ASCII ordering, independent of the browser's locale.
+    return a.prerelease[index] < b.prerelease[index] ? -1 : 1;
+  }
+  return 0;
+}

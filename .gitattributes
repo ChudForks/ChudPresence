@@ -1,0 +1,6 @@
+# Generated contracts must retain the builder's LF endings on Windows.
+extension/core/activity-contract.generated.js text eol=lf
+extension/core/activity-v2-*.generated.js text eol=lf
+schemas/*.json text eol=lf
+extension/default-activities/**/*.js text eol=lf
+extension/default-activities/**/*.json text eol=lf
