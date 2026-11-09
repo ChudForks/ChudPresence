@@ -1,0 +1,15 @@
+ChudPresence
+Copyright (C) 2026 ChudForks
+
+ChudPresence is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, version 3 of the License. See LICENSE for the full license text.
+
+ChudPresence is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU General Public License for details.
+
+Third-party components retain their own copyright notices and license terms.
+The embedded QuickJS and quickjs-emscripten notices are in
+extension/vendor/QUICKJS-NOTICE.txt (vendor/QUICKJS-NOTICE.txt in a browser
+package).

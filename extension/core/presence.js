@@ -158,6 +158,11 @@ function statusDisplayType(report, settings) {
   const selected = report.display.statusFields?.[settings.statusDisplay];
   if (selected) return selected;
   if (settings.statusDisplay === 'app') return 'name';
+  // Series-focused layouts can put the series above the episode instead.
+  if (report.kind === 'episode' && report.media.series && report.display.details === report.media.series) {
+    if (settings.statusDisplay === 'artist') return 'details';
+    if (settings.statusDisplay === 'track') return 'state';
+  }
   if (settings.statusDisplay === 'artist' || settings.statusDisplay === 'creator') return 'state';
   if (settings.statusDisplay === 'track' || settings.statusDisplay === 'video') return 'details';
   return report.display.statusDisplay || 'name';

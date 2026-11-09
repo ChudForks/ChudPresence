@@ -1,6 +1,6 @@
 # Privacy — ChudPresence
 
-_Last updated: October 27, 2026. This notice describes ChudPresence extension 2.1.0 and the current first-party Activity packages. Activity packages update separately from the extension, so review their current source and access declarations before installing or updating them._
+_Last updated: November 9, 2026. This notice describes ChudPresence extension 2.1.1 and the current first-party Activity packages. Activity packages update separately from the extension, so review their current source and access declarations before installing or updating them._
 
 ## In brief
 

@@ -50,6 +50,9 @@ for (const browser of targets) {
     assert.deepEqual(entries.get(name), bytes, `Archive differs from unpacked build: ${name}`);
   }
   assert.ok(entries.has('manifest.json'), 'Installable package must have manifest.json at its root');
+  for (const filename of ['LICENSE', 'COPYRIGHT']) {
+    assert.deepEqual(entries.get(filename), await fs.readFile(path.join(root, filename)), `Missing or incorrect ${filename} in ${browser}`);
+  }
   const manifest = JSON.parse(entries.get('manifest.json').toString('utf8'));
   assert.equal(manifest.version, version);
   assert.deepEqual(manifest, await loadPackageManifest(browser), 'Packaged manifest does not match the selected identity');
@@ -66,8 +69,8 @@ for (const browser of targets) {
   for (const reference of references) {
     if (!reference.includes('*')) assert.ok(entries.has(reference), `Missing manifest resource: ${reference}`);
   }
-  for (const shared of ['core/activity-contract.generated.js', 'core/activity-v2-engine.generated.js', 'core/activity-v2-page.generated.js']) {
-    assert.deepEqual(entries.get(shared), await fs.readFile(path.join(root, 'extension', shared)), `Shared Activity contract or engine changed in ${browser}: ${shared}`);
+  for (const shared of ['core/presence.js', 'core/activity-contract.generated.js', 'core/activity-v2-engine.generated.js', 'core/activity-v2-page.generated.js']) {
+    assert.deepEqual(entries.get(shared), await fs.readFile(path.join(root, 'extension', shared)), `Shared Activity runtime differs in ${browser}: ${shared}`);
   }
   if (browser !== 'chromium') {
     assert.ok(manifest.browser_specific_settings?.gecko?.id, 'Firefox add-on identity is required');

@@ -21,7 +21,8 @@ async function harness(source, { path = '/watch?v=abcdefghijk', bridge = true } 
   const listeners = new Map();
   const reports = [];
   const location = new URL(`https://www.youtube.com${path}`);
-  const video = { currentTime: 12, duration: 100, paused: false, ended: false, playbackRate: 1 };
+  const video = { currentTime: 12, duration: 100, paused: false, ended: false, playbackRate: 1,
+    readyState: 4, HAVE_FUTURE_DATA: 3 };
   const preview = { ...video };
   const page = { videoId: 'abcdefghijk', title: 'Watched video', author: 'Creator',
     position: 12, duration: 100, state: 1, live: false, ad: false };
@@ -110,6 +111,24 @@ for (const [name, path] of sources) {
     await activity.advance();
     assert.equal(activity.reports.at(-1).playback.state, 'playing');
     assert.equal(activity.reports.at(-1).playback.position, 0);
+  });
+
+  test(`${name} YouTube reports buffering as non-playing until playback resumes`, async () => {
+    for (const bridge of [true, false]) {
+      const activity = await harness(source, { bridge });
+      assert.equal(activity.reports.at(-1).playback.state, 'playing');
+
+      if (bridge) activity.page.state = 3;
+      else activity.video.readyState = 2;
+      await activity.advance();
+      assert.equal(activity.reports.at(-1).playback.state, 'paused');
+      assert.equal(activity.reports.at(-1).media.title, 'Watched video');
+
+      activity.page.state = 1;
+      activity.video.readyState = 4;
+      await activity.advance();
+      assert.equal(activity.reports.at(-1).playback.state, 'playing');
+    }
   });
 
   test(`${name} YouTube clears DOM endings with and without the page bridge`, async () => {

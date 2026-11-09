@@ -65,6 +65,10 @@ Choose **Refresh catalog** in Activity Library to discover and install Activitie
 
 See [Privacy](PRIVACY.md) for information about permissions, data handling, and Discord publishing.
 
+## License
+
+Copyright © 2026 ChudForks. ChudPresence is licensed under the [GNU General Public License, version 3.0](LICENSE) (GPL-3.0-only). See [COPYRIGHT](COPYRIGHT) for the copyright notice and third-party licensing information.
+
 ## Browser differences
 
 The current build has shown the following difference for browsing presence while the Activity's tab remains selected:

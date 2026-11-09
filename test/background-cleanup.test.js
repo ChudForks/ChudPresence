@@ -14,7 +14,7 @@ const source = (await readFile(new URL('../extension/background.js', import.meta
   .replace(/^import[\s\S]*?from '[^']+';\r?\n/gm, '');
 
 async function createBackgroundHarness(activityPreferences = {}, {
-  getStoredSettings = async () => ({}), waitForReady = true, now = Date.now, sessionData = {},
+  getStoredSettings = async () => ({}), waitForReady = true, now = Date.now, sessionData = {}, installed = [],
 } = {}) {
   const timers = new Map();
   const publications = [];
@@ -53,7 +53,7 @@ async function createBackgroundHarness(activityPreferences = {}, {
     ActivityManager: class {
       constructor(callbacks) { managerCallbacks = callbacks; }
       async load() { return {}; }
-      async status() { return { installed: [] }; }
+      async status() { return { installed }; }
       restoreAll() { return Promise.resolve(); }
       invalidateTab() { return Promise.resolve(); }
       preferencesFor(id) { return activityPreferences[id] || {}; }
@@ -320,6 +320,56 @@ test('switching the viewed tab selects its playing media immediately without ano
   assert.equal(harness.publications.at(-1).intent.details, 'Song 10');
   harness.focus(-1);
   assert.equal(harness.publications.at(-1).intent.details, 'Song 10');
+});
+
+test('popup playback diagnostics follow the winning tab while Activity history can come from another tab', async () => {
+  const playing = { activityId: 'youtube', kind: 'video', media: { title: 'Playing' },
+    playback: { state: 'playing' }, visibility: 'normal' };
+  const paused = { ...playing, media: { title: 'Paused' }, playback: { state: 'paused' } };
+  const activity = { id: 'youtube', normalizedReport: paused,
+    lastReport: { tabId: 9, timestamp: '2026-01-01T00:00:01Z' },
+    lastClear: { tabId: 9, timestamp: '2026-01-01T00:00:00Z' } };
+  const harness = await createBackgroundHarness({}, { installed: [activity] });
+  const report = (tabId, track) => harness.callbacks.onReport({ tabId, documentId: `document-${tabId}`, frameId: 0, track });
+  const popupState = () => harness.sendMessage({ type: 'GET_STATE' }, 'chrome-extension://test/popup.html');
+
+  report(10, playing);
+  report(9, paused);
+  let state = await popupState();
+  assert.equal(state.track.media.title, 'Playing');
+  assert.equal(state.activityDiagnostics.playbackState, 'playing');
+  assert.equal(state.activityDiagnostics.lastReport.tabId, 9);
+  assert.equal(state.activityDiagnostics.lastClear.tabId, 9);
+
+  activity.normalizedReport = { ...paused, visibility: 'private' };
+  report(9, activity.normalizedReport);
+  state = await popupState();
+  assert.equal(state.activityDiagnostics.visibility, 'normal');
+
+  harness.removeTab(10);
+  state = await popupState();
+  assert.equal(state.track, null);
+  assert.equal(state.activityDiagnostics.playbackState, 'paused');
+  assert.equal(state.activityDiagnostics.visibility, 'private');
+});
+
+test('popup playback diagnostics use the legacy selected track state and ignore unrelated Activity history', async () => {
+  const activity = { id: 'youtube', normalizedReport: { playback: { state: 'playing' }, visibility: 'normal' },
+    lastReport: { tabId: 10, timestamp: '2026-01-01T00:00:00Z' } };
+  const harness = await createBackgroundHarness({}, { installed: [activity] });
+  const report = (tabId, track) => harness.callbacks.onReport({ tabId, documentId: `legacy-${tabId}`, frameId: 0, track });
+  const popupState = () => harness.sendMessage({ type: 'GET_STATE' }, 'chrome-extension://test/popup.html');
+
+  report(9, { activityId: 'youtube', title: 'Legacy paused video', playing: false });
+  let state = await popupState();
+  assert.equal(state.activityDiagnostics.playbackState, 'paused');
+  assert.equal(state.activityDiagnostics.visibility, null);
+
+  report(11, { title: 'Legacy playing video', playing: true });
+  state = await popupState();
+  assert.equal(state.activityDiagnostics.playbackState, 'playing');
+  assert.equal(state.activityDiagnostics.activityId, null);
+  assert.equal(state.activityDiagnostics.lastReport, null);
 });
 
 test('saved rules load before selection and invalid or unprivileged updates cannot change priority', async () => {

@@ -74,7 +74,7 @@ test('display controls are opt-in and a later playback report restores saved pre
       playback: { state: 'paused', position: 120, duration: 1422 },
     }, apiVersion);
     const intent = createPresenceIntent({ ...playback, activityName: 'Anikoto' }, 100_000, { statusDisplay: 'track' });
-    assert.equal(intent.statusDisplayType, 'details');
+    assert.equal(intent.statusDisplayType, 'state');
     assert.equal(intent.state, 'Episode 9 • Paused');
     const explicitFalse = createPresenceIntent({ ...playback, display: { ...playback.display, hideState: false } }, 100_000);
     assert.equal(explicitFalse.state, 'Episode 9 • Paused');
@@ -379,6 +379,31 @@ test('uses generic Activity reports for YouTube Shorts and live streams', () => 
   assert.equal(live.state, 'A Channel • Live');
   assert.equal(live.statusDisplayType, 'details');
   assert.deepEqual(live.timestamps, { start: 910 });
+});
+
+test('series and episode status choices follow the content in either display order', () => {
+  for (const apiVersion of [1, 2]) {
+    for (const [display, seriesField, episodeField, episodeText] of [
+      [undefined, 'details', 'state', 'The Adventure Begins'],
+      [{ details: 'Example Series', state: 'Season 1, Episode 3' }, 'details', 'state', 'Season 1, Episode 3'],
+      [{ details: 'The Adventure Begins', state: 'Example Series' }, 'state', 'details', 'The Adventure Begins'],
+    ]) {
+      const report = normalizeActivityReport({
+        kind: 'episode',
+        media: { title: 'The Adventure Begins', series: 'Example Series', season: 1, episode: 3 },
+        ...(display ? { display } : {}),
+      }, apiVersion);
+      const series = createPresenceIntent(report, 1_000_000, { statusDisplay: 'artist' });
+      const episode = createPresenceIntent(report, 1_000_000, { statusDisplay: 'track' });
+      assert.equal(series.statusDisplayType, seriesField);
+      assert.equal(series[series.statusDisplayType], 'Example Series');
+      assert.equal(episode.statusDisplayType, episodeField);
+      assert.equal(episode[episode.statusDisplayType], episodeText);
+      assert.equal(createPresenceIntent(report, 1_000_000, { statusDisplay: 'app' }).statusDisplayType, 'name');
+      const overridden = { ...report, display: { ...report.display, statusDisplayOverride: 'name' } };
+      assert.equal(createPresenceIntent(overridden, 1_000_000, { statusDisplay: 'artist' }).statusDisplayType, 'name');
+    }
+  }
 });
 
 test('uses Activity-authored Crunchyroll display overrides without a provider branch', () => {

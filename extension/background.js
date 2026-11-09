@@ -206,16 +206,20 @@ function localPresenceIntent(track) {
 }
 
 function diagnosticForState(installed, track) {
-  const selected = installed.find((record) => record.id === track?.activityId)
-    || [...installed].sort((left, right) =>
+  const activity = track
+    ? installed.find((record) => record.id === track.activityId)
+    : [...installed].sort((left, right) =>
       Date.parse(right.lastReport?.timestamp || right.lastClear?.timestamp || 0) -
       Date.parse(left.lastReport?.timestamp || left.lastClear?.timestamp || 0))[0];
+  const latestReport = activity?.normalizedReport;
   return {
-    activityId: selected?.id || null,
-    visibility: selected?.normalizedReport?.visibility || track?.visibility || null,
-    playbackState: selected?.normalizedReport?.playback?.state || track?.playback?.state || null,
-    lastReport: selected?.lastReport || null,
-    lastClear: selected?.lastClear || null,
+    activityId: track?.activityId || activity?.id || null,
+    visibility: (track ? track.visibility : latestReport?.visibility) || null,
+    playbackState: track
+      ? track.playback?.state || (track.playing ? 'playing' : 'paused')
+      : latestReport?.playback?.state || null,
+    lastReport: activity?.lastReport || null,
+    lastClear: activity?.lastClear || null,
   };
 }
 

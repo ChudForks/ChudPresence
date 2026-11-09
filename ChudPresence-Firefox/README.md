@@ -24,7 +24,7 @@ the permanent add-on ID **`chudpresence@chudforks`**, configured in
 [`production.json`](production.json). Mozilla will check the ID's availability
 when this new listing is submitted. Keep the ID unchanged for future updates.
 
-The candidate is `dist/ChudPresence-Firefox-2.1.0-unsigned-production.xpi` (with the
+The candidate is `dist/ChudPresence-Firefox-2.1.1-unsigned-production.xpi` (with the
 current version in its filename). It still requires Mozilla signing before
 normal installation. `npm run build:firefox` continues to build the separate
 development identity; `npm run build:all` builds Chromium and both Firefox

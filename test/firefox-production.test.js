@@ -16,7 +16,7 @@ async function fixture(t) {
   });
   await fs.mkdir(path.join(root, 'extension'), { recursive: true });
   await fs.mkdir(path.join(root, 'ChudPresence-Firefox/extension'), { recursive: true });
-  for (const name of ['extension/manifest.json', 'ChudPresence-Firefox/extension/manifest.json', 'ChudPresence-Firefox/production.json']) {
+  for (const name of ['LICENSE', 'COPYRIGHT', 'extension/manifest.json', 'ChudPresence-Firefox/extension/manifest.json', 'ChudPresence-Firefox/production.json']) {
     await fs.copyFile(new URL(`../${name}`, import.meta.url), path.join(root, name));
   }
   const { version } = await loadPackageManifest('chromium', root);
@@ -49,7 +49,7 @@ test('building the production candidate preserves the existing development packa
   const packagedManifest = JSON.parse(await fs.readFile(path.join(production.staged, 'manifest.json'), 'utf8'));
   assert.equal(packagedManifest.browser_specific_settings.gecko.id, productionId);
   assert.equal(packagedManifest.name, 'ChudPresence');
-  for (const filename of ['background.js', 'background.html']) {
+  for (const filename of ['background.js', 'background.html', 'LICENSE', 'COPYRIGHT']) {
     assert.deepEqual(await fs.readFile(path.join(production.staged, filename)), await fs.readFile(path.join(development.staged, filename)));
   }
 });

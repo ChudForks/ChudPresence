@@ -125,6 +125,9 @@ export async function buildPackages(target = 'chromium', { sourceRoot = root } =
     await fs.rm(staged, { recursive: true, force: true });
     await fs.cp(source, staged, { recursive: true });
     if (browser !== 'chromium') await fs.cp(firefoxOverlay, staged, { recursive: true, force: true });
+    for (const filename of ['LICENSE', 'COPYRIGHT']) {
+      await fs.copyFile(path.join(sourceRoot, filename), path.join(staged, filename));
+    }
     if (browser === 'firefox-production') {
       await fs.writeFile(path.join(staged, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
     }

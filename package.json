@@ -1,9 +1,10 @@
 {
   "name": "chudpresence",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "private": true,
   "type": "module",
   "description": "Share your browsing and playback activity on Discord with customizable Activities.",
+  "license": "GPL-3.0-only",
   "scripts": {
     "check": "node scripts/check.mjs && node scripts/build-v2-engine.mjs --check",
     "test": "node --test test/*.test.js",
