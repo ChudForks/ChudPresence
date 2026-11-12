@@ -35,6 +35,7 @@ const clearLogsButton = document.getElementById('developer-clear-logs');
 const inspector = document.getElementById('activity-inspector');
 const inspectorContent = document.getElementById('inspector-content');
 const libraryLayout = document.getElementById('library-layout');
+const heroWall = document.getElementById('hero-wall');
 
 let catalog = null;
 let installed = [];
@@ -55,6 +56,7 @@ let renderedInspectorId = '';
 let discoverRenderKey = '';
 let installedRenderKey = '';
 let updatesRenderKey = '';
+let heroWallKey = null;
 
 function visibleList() {
   return { discover: discoverList, installed: installedList, updates: updatesList }[currentView];
@@ -296,7 +298,9 @@ function refreshCounters() {
   }).length || 0;
   document.getElementById('discover-count').textContent = String(catalog?.activities?.length || 0);
   document.getElementById('installed-count').textContent = String(installed.length);
-  document.getElementById('update-count').textContent = String(updateCount);
+  const updateBadge = document.getElementById('update-count');
+  updateBadge.textContent = String(updateCount);
+  updateBadge.classList.toggle('has-updates', updateCount > 0);
 }
 
 function appendEmpty(target, title, detail) {
@@ -364,6 +368,18 @@ function activityLogo(entry) {
   return mark;
 }
 
+// A blurred copy of the Activity icon tints its card with the brand's color.
+function activityGlow(entry, className) {
+  const icon = cardIcon(entry.id, entry.icon, entry.catalogSource);
+  if (!icon) return null;
+  const glow = element('img', className);
+  glow.src = icon;
+  glow.alt = '';
+  glow.setAttribute('aria-hidden', 'true');
+  glow.addEventListener('error', () => glow.remove());
+  return glow;
+}
+
 function activityState(record) {
   if (!record) return 'Not installed';
   const status = {
@@ -376,7 +392,8 @@ function activityState(record) {
 
 function stateClass(record) {
   return record?.status === 'detected' ? ' active'
-    : ['incompatible', 'permission-missing', 'error'].includes(record?.status) ? ' issue' : '';
+    : ['incompatible', 'permission-missing', 'error'].includes(record?.status) ? ' issue'
+      : record?.status === 'disabled' || record?.enabled === false ? ' disabled' : '';
 }
 
 function activityRow(entry, state, className = '') {
@@ -388,14 +405,11 @@ function activityRow(entry, state, className = '') {
   button.setAttribute('aria-controls', 'inspector-content');
   button.tabIndex = -1;
   const content = element('span', 'row-content');
-  const category = element('span', 'card-category', (entry.category || 'other').replaceAll('-', ' '));
   const name = element('span', 'row-title', entry.name);
   name.title = entry.name;
   const description = element('span', 'row-description', entry.description || 'No description provided.');
-  const meta = element('span', 'row-meta');
-  meta.append(category, element('span', 'row-version', formatVersion(entry.version || '0.0.0')),
-    element('span', '', `API v${entry.apiVersion || 1}`));
-  content.append(name, description, meta);
+  // The state belongs to the card's name, so it is announced with the Activity.
+  content.append(name, description, element('span', 'row-state' + className, state));
   button.append(activityLogo(entry), content);
   button.addEventListener('click', () => selectActivity(entry.id, { open: true }));
   button.addEventListener('keydown', (event) => {
@@ -439,7 +453,14 @@ function activityRow(entry, state, className = '') {
   quickAction.setAttribute('aria-label', `${record ? 'Remove' : 'Add'} ${entry.name}`);
   quickAction.title = compatibility || `${record ? 'Remove' : 'Add'} ${entry.name}`;
   actions.append(details, quickAction);
-  footer.append(element('span', 'row-state' + className, state), actions);
+  const meta = element('span', 'row-meta');
+  const apiVersion = element('span', 'row-api', `API v${entry.apiVersion || 1}`);
+  apiVersion.dataset.api = String(entry.apiVersion || 1);
+  meta.append(element('span', 'card-category', (entry.category || 'other').replaceAll('-', ' ')),
+    element('span', 'row-version', formatVersion(entry.version || '0.0.0')), apiVersion);
+  footer.append(meta, actions);
+  const glow = activityGlow(entry, 'activity-glow');
+  if (glow) row.append(glow);
   row.append(button, footer);
   return row;
 }
@@ -468,8 +489,8 @@ function appendPageAccess(content, pageAccess) {
   content.append(access);
 }
 
-function inspectorSection(title) {
-  const section = element('section', 'inspector-section');
+function inspectorSection(title, kind) {
+  const section = element('section', `inspector-section section-${kind}`);
   section.append(element('h3', '', title));
   return section;
 }
@@ -521,11 +542,14 @@ function renderInspector() {
   const identity = element('div', 'inspector-identity');
   const name = element('h2', 'inspector-name', data.name);
   name.tabIndex = -1;
-  const title = element('div');
-  title.append(name, element('span', 'inspector-category', (data.category || 'other').replaceAll('-', ' ')));
+  const title = element('div', 'inspector-title-block');
+  const tags = element('div', 'inspector-tags');
+  tags.append(element('span', 'inspector-state' + stateClass(record), record ? 'Installed · ' + activityState(record) : 'Available to install'),
+    element('span', 'inspector-category', (data.category || 'other').replaceAll('-', ' ')),
+    element('span', 'inspector-version', formatVersion(record?.version || data.version || '0.0.0')));
+  title.append(name, tags);
   identity.append(activityLogo(data), title);
-  introduction.append(identity, element('p', 'inspector-description', data.description || 'No description provided.'),
-    element('div', 'inspector-state' + stateClass(record), record ? 'Installed · ' + activityState(record) : 'Available to install'));
+  introduction.append(identity, element('p', 'inspector-description', data.description || 'No description provided.'));
   const actions = element('div', 'inspector-actions');
   const compatibility = compatibilityMessage(data);
   const canUpdate = currentView !== 'installed' && hasNewerCatalogVersion(data, record);
@@ -544,6 +568,8 @@ function renderInspector() {
       actions.append(reload);
     }
   }
+  const glow = activityGlow(data, 'detail-glow');
+  if (glow) overview.append(glow);
   overview.append(introduction, actions);
   detail.append(overview);
   if (canUpdate && (!record.source?.type || record.source.type === 'local')) {
@@ -553,7 +579,7 @@ function renderInspector() {
     detail.append(element('p', 'notice error', compatibility || record.error || record.compatibilityStatus));
   }
   if (record) renderActivitySettings(record, configuration);
-  const information = inspectorSection('Package details');
+  const information = inspectorSection('Package details', 'package');
   const metadata = element('dl', 'inspector-metadata');
   const fields = [
     [currentView === 'installed' ? 'Version' : 'Catalog version', formatVersion(data.version || '0.0.0')],
@@ -569,17 +595,18 @@ function renderInspector() {
     element('dd', ['Version', 'Catalog version', 'Installed', 'Identifier'].includes(label) ? 'version-value' : '', value));
   information.append(metadata);
   configuration.append(information);
-  const websites = inspectorSection('Supported websites');
+  const websites = inspectorSection('Supported websites', 'websites');
   const sites = element('ul', 'inspector-sites');
   for (const match of data.matches || []) sites.append(element('li', '', match));
   websites.append(sites);
   configuration.append(websites);
-  const access = inspectorSection('Access & privacy');
+  const access = inspectorSection('Access & privacy', 'access');
   if (record && currentView !== 'installed' && (record.version !== data.version || record.apiVersion !== data.apiVersion)) {
     access.append(element('p', 'access-explanation', 'The access below applies to catalog ' + formatVersion(data.version) + '. Select this Activity in Installed to review the installed package.'));
   }
   const trusted = !data.apiVersion || data.apiVersion === 1;
-  access.append(element('span', 'trust-label', data.apiVersion === 2 ? 'Sandboxed Activity' : trusted ? 'Trusted Activity code' : 'Unsupported Activity API'),
+  access.append(element('span', `trust-label ${data.apiVersion === 2 ? 'is-sandboxed' : trusted ? 'is-trusted' : 'is-unsupported'}`,
+    data.apiVersion === 2 ? 'Sandboxed Activity' : trusted ? 'Trusted Activity code' : 'Unsupported Activity API'),
     element('p', 'access-explanation', data.apiVersion === 2
       ? 'Runs in a sandbox. Page reads are limited to the fields declared below, on websites you approve.'
       : trusted ? 'Runs as trusted JavaScript on approved websites. V1 code can read page content and does not have V2’s sandbox or declared page-read restrictions.'
@@ -642,7 +669,7 @@ function renderDiscover() {
       const compatibility = compatibilityMessage(entry);
       const update = hasNewerCatalogVersion(entry, record);
       return activityRow(entry, compatibility ? 'Unavailable' : update ? 'Update available' : record ? 'Installed' : 'Available',
-        compatibility ? ' issue' : update ? ' update' : !record ? ' available' : '');
+        compatibility ? ' issue' : update ? ' update' : !record ? ' available' : ' installed');
     });
     if (!rows.length) {
       const empty = element('div');
@@ -784,7 +811,35 @@ function renderUpdates() {
   replaceActivityRows(updatesList, rows);
 }
 
+// The page heading is decorated with a wall of the catalog's own icons.
+function renderHeroWall() {
+  const sources = catalog?.activities?.length ? catalog.activities : installed;
+  const icons = [...new Set(sources.map((entry) => cardIcon(entry.id, entry.icon, entry.catalogSource)).filter(Boolean))];
+  const key = icons.join('\n');
+  if (key === heroWallKey) return;
+  heroWallKey = key;
+  // The wall has six columns. A stride sharing no factor with the icon count
+  // visits every icon, and each row is offset by one so tiles above differ too.
+  const gcd = (a, b) => (b ? gcd(b, a % b) : a);
+  const stride = [5, 7, 11, 13].find((step) => gcd(step, icons.length) === 1 && (6 * step + 1) % icons.length) || 1;
+  const tiles = [];
+  for (let index = 0; index < 24; index += 1) {
+    const tile = element('span', 'hero-tile');
+    const icon = icons[(index * stride + Math.floor(index / 6)) % icons.length];
+    if (icon) {
+      const image = element('img');
+      image.src = icon;
+      image.alt = '';
+      image.addEventListener('error', () => image.remove());
+      tile.append(image);
+    }
+    tiles.push(tile);
+  }
+  heroWall.replaceChildren(...tiles);
+}
+
 function renderAll() {
+  renderHeroWall();
   renderDiscover();
   renderInstalled();
   renderUpdates();
@@ -837,7 +892,7 @@ async function refreshInstalled({ polling = false } = {}) {
     selectionDiagnostics: state.selectionDiagnostics || null,
   };
   userScriptsAvailable = state.userScriptsPermission === true;
-  document.getElementById('firefox-setup-notice').hidden = !isFirefox || userScriptsAvailable;
+  document.getElementById('firefox-setup-notice').hidden = userScriptsAvailable;
   setLibraryStatus(
     nextPermissionStep || (userScriptsAvailable || isFirefox ? '' : USER_SCRIPTS_REQUIRED),
     userScriptsAvailable || isFirefox ? 'on' : 'error',
@@ -1089,7 +1144,7 @@ async function loadLocalActivity() {
 
 async function initialize() {
   configureUserScriptsDialog(document);
-  document.getElementById('firefox-setup-link').hidden = !isFirefox;
+  document.getElementById('firefox-setup-link').hidden = false;
   const tabs = [...document.querySelectorAll('.tab')];
   for (const button of tabs) {
     button.addEventListener('click', () => showView(button.dataset.view));

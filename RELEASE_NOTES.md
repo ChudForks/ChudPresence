@@ -1,3 +1,9 @@
+# ChudPresence 2.1.2
+
+- Added a first-run setup page for Chromium browsers. It opens on first install and guides you through allowing User Scripts, connecting Discord, and trying the included YouTube Activity.
+- Setup (Chromium and Firefox) now puts Connect Discord at step 2. Discord sign-in is optional only when the ChudPresence Link desktop app is paired, and the page links to its GitHub download and the Microsoft Store.
+- The popup setup card and the Activity Library setup notice and guide link now appear in Chromium too.
+
 # ChudPresence 2.1.1
 
 - Fixed Series and Episode status selection for episode layouts, including

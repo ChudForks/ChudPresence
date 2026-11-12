@@ -186,7 +186,7 @@ async function refreshInstalledActivities(openActivityId = '') {
   const state = await activityMessage({ type: 'ACTIVITY_LIBRARY_STATE' });
   installedActivities = Array.isArray(state?.installed) ? state.installed : [];
   priorityEditor.update(state, priorityRevision);
-  if (isFirefox) {
+  {
     const stored = await chrome.storage.local.get(FIREFOX_ONBOARDING_KEY).catch(() => ({}));
     const needsPermission = state.userScriptsPermission !== true;
     document.getElementById('firefox-setup-card').hidden = !needsPermission && stored[FIREFOX_ONBOARDING_KEY]?.completed === true;

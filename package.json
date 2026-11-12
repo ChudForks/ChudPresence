@@ -1,6 +1,6 @@
 {
   "name": "chudpresence",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "private": true,
   "type": "module",
   "description": "Share your browsing and playback activity on Discord with customizable Activities.",

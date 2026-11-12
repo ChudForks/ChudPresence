@@ -24,7 +24,7 @@ the permanent add-on ID **`chudpresence@chudforks`**, configured in
 [`production.json`](production.json). Mozilla will check the ID's availability
 when this new listing is submitted. Keep the ID unchanged for future updates.
 
-The candidate is `dist/ChudPresence-Firefox-2.1.1-unsigned-production.xpi` (with the
+The candidate is `dist/ChudPresence-Firefox-2.1.2-unsigned-production.xpi` (with the
 current version in its filename). It still requires Mozilla signing before
 normal installation. `npm run build:firefox` continues to build the separate
 development identity; `npm run build:all` builds Chromium and both Firefox
@@ -40,11 +40,13 @@ On first installation, a **Welcome to ChudPresence** tab opens automatically:
    data**, then choose **Allow**.
    An Activity teaches ChudPresence how to detect playback on a website. The
    Services list stays empty until this permission is granted.
-2. The included YouTube Activity is added automatically. Open YouTube and play a
+2. Choose **Connect Discord** to share your activity. Signing in is optional only if
+   you use the ChudPresence Link desktop app (download it from GitHub or search
+   for **ChudPresence Link** in the Microsoft Store). You can finish setup
+   without connecting and sign in later from the popup.
+3. The included YouTube Activity is added automatically. Open YouTube and play a
    video, then open ChudPresence from Firefox's Extensions menu (the puzzle
    piece) to check the **Local presence preview**.
-3. Optionally choose **Connect Discord** to share your activity. You can finish
-   setup without connecting and sign in later from the popup.
 
 If you dismiss the permission request, choose **Enable Activities** again to
 retry. Reopen the guide from **Settings → Open setup guide** in the

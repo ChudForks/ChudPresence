@@ -31,23 +31,24 @@
             <button class="button primary" id="enable-activities" type="button" disabled>Checking permission…</button>
           </div>
         </li>
-        <li class="setup-step" id="activity-step">
+        <li class="setup-step" id="discord-step">
           <span class="step-number" aria-hidden="true">2</span>
+          <div class="step-content">
+            <div class="step-heading"><h2>Connect Discord</h2><span class="step-state" id="discord-state">Needed to share</span></div>
+            <p>Sign in to Discord to share detected activity on your profile. This is optional only if you use the <strong>ChudPresence Link</strong> desktop app, which shares your activity for you. You can try the local preview first and connect later from the ChudPresence popup.</p>
+            <button class="button secondary" id="connect-discord" type="button" disabled>Checking connection…</button>
+            <p class="step-hint link-app-hint" id="link-app-hint">Don’t have ChudPresence Link? <a href="https://github.com/ChudForks/ChudPresence-Link/releases/tag/v0.4.1-build.cf1de1439101cbbece94a02d5aac484c24cd8d2e" target="_blank" rel="noopener noreferrer">Download it from GitHub</a>, or search for <strong>ChudPresence Link</strong> in the Microsoft Store. Then pair it from the Link tab in the ChudPresence popup.</p>
+            <p class="step-hint" id="discord-feedback" role="status" aria-live="polite"></p>
+          </div>
+        </li>
+        <li class="setup-step" id="activity-step">
+          <span class="step-number" aria-hidden="true">3</span>
           <div class="step-content">
             <div class="step-heading"><h2>Try your first Activity</h2><span class="step-state" id="activity-state">Next</span></div>
             <p id="activity-description">YouTube is included, so you can try it without downloading anything else. Enable Activities above to get it ready.</p>
             <p>Play a YouTube video, then click ChudPresence in Firefox’s Extensions menu (the puzzle piece) to see your <strong>Local presence preview</strong>. Existing tabs are detected automatically; reload the video’s tab if it stays blank.</p>
             <div class="step-actions"><button class="button secondary" id="try-youtube" type="button" disabled>Open YouTube</button><a href="activities.html">Browse more Activities</a></div>
             <p class="step-hint">In the Library, choose <strong>Refresh catalog</strong> and approve catalog access. Install an Activity for each site you use, reviewing its requested website access.</p>
-          </div>
-        </li>
-        <li class="setup-step" id="discord-step">
-          <span class="step-number" aria-hidden="true">3</span>
-          <div class="step-content">
-            <div class="step-heading"><h2>Connect Discord</h2><span class="step-state" id="discord-state">Optional</span></div>
-            <p>Sign in to Discord to share detected activity on your profile. You can try the local preview first and connect later from the ChudPresence popup.</p>
-            <button class="button secondary" id="connect-discord" type="button" disabled>Checking connection…</button>
-            <p class="step-hint" id="discord-feedback" role="status" aria-live="polite"></p>
           </div>
         </li>
       </ol>

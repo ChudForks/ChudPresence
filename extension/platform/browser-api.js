@@ -38,9 +38,8 @@ export function configureUserScriptsDialog(document) {
 
 export const FIREFOX_ONBOARDING_KEY = 'firefoxOnboarding';
 
-/** Register synchronously so Firefox can wake the event page for installation. */
-export function registerFirefoxOnboarding(api = browserApi) {
-  if (!isFirefox) return;
+/** Register synchronously so the browser can wake the background for installation. */
+export function registerOnboarding(api = browserApi) {
   api.runtime.onInstalled.addListener(async ({ reason }) => {
     if (reason !== 'install') return;
     try {
@@ -52,6 +51,10 @@ export function registerFirefoxOnboarding(api = browserApi) {
       // Setup remains available from the popup and Library if opening fails.
     }
   });
+}
+
+export function registerFirefoxOnboarding(api = browserApi) {
+  if (isFirefox) registerOnboarding(api);
 }
 
 export function openUserScriptsSettings(api = browserApi) {

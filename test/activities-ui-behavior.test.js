@@ -195,7 +195,7 @@ test('Firefox Library explains missing setup with a guide link and updates after
   assert.equal(ui.elements.get('firefox-setup-notice').hidden, true);
   assert.equal(ui.elements.get('firefox-setup-link').hidden, false, 'guide remains available after setup');
   const chromium = await createLibrary();
-  assert.equal(chromium.elements.get('firefox-setup-link').hidden, true);
+  assert.equal(chromium.elements.get('firefox-setup-link').hidden, false, 'Chromium also offers the setup guide');
   assert.equal(chromium.elements.get('firefox-setup-notice').hidden, true);
 });
 
@@ -669,6 +669,25 @@ test('Discover, Installed, and Updates load V2 catalog icons from the pinned V2 
     assert.equal(ui.elements.get(grid).querySelector('.activity-logo-image').src,
       `https://raw.githubusercontent.com/ChudForks/ChudPresence-Activities-V2/${'b'.repeat(40)}/${entry.icon}`);
   }
+});
+
+test('Library heading decorates its icon wall with every catalog icon and no repeated neighbors', async () => {
+  for (const count of [2, 3, 5, 6, 14]) {
+    const entries = Array.from({ length: count }, (_, index) => `activity-${index}`).map((id) => ({
+      id, name: id, version: '1.0.0', apiVersion: 1, matches: [`https://${id}.example.test/*`], icon: `activities/${id}/icon.png`,
+    }));
+    const ui = await createLibrary({ catalog: { activities: entries } });
+    const sources = ui.elements.get('hero-wall').children.map((tile) => tile.querySelector('img')?.src);
+    assert.equal(sources.length, 24);
+    assert.deepEqual(new Set(sources), new Set(entries.map((entry) => activityCatalogIconUrl(entry))));
+    for (const [index, source] of sources.entries()) {
+      if (index % 6) assert.notEqual(source, sources[index - 1], `${count} icons: tile ${index} repeats its left neighbor`);
+      if (index >= 6) assert.notEqual(source, sources[index - 6], `${count} icons: tile ${index} repeats the tile above`);
+    }
+  }
+  const empty = await createLibrary();
+  assert.equal(empty.elements.get('hero-wall').children.length, 24);
+  assert.equal(empty.elements.get('hero-wall').querySelector('img'), null);
 });
 
 test('Live diagnostics update without replacing unchanged rows or the selected inspector', async () => {

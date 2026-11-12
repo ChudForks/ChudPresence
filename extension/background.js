@@ -1,4 +1,4 @@
-import { browserApi, isFirefox, registerFirefoxOnboarding } from './platform/browser-api.js';
+import { browserApi, isFirefox, registerOnboarding } from './platform/browser-api.js';
 import { migratePlatformSettings } from './platform/migration.js';
 import {
   ACTIVITY_PRIORITY_STORAGE_KEY, normalizeActivityPriorityRules, validateActivityPriorityRules, selectPriorityActivity,
@@ -27,7 +27,7 @@ import {
 import { presencePublisher } from './platform/presence-publisher.js';
 import { EXTENSION_NAME } from './core/branding.js';
 
-if (isFirefox) registerFirefoxOnboarding(browserApi);
+registerOnboarding(browserApi);
 
 const activityRegistry = new ActivityRegistry();
 const presenceSession = createPresenceSession({ storage: chrome.storage.session });

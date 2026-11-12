@@ -1,0 +1,37 @@
+.setup-shell { width: min(800px, calc(100% - 48px)); margin: 0 auto; padding: 56px 0 40px; }
+.setup-intro { max-width: 680px; margin-bottom: 28px; }
+.setup-eyebrow { display: block; margin-bottom: 16px; color: var(--accent-bright); font-size: 11px; font-weight: 650; letter-spacing: 1.7px; }
+.setup-intro h1 { font-size: clamp(30px, 5vw, 46px); line-height: 1.15; letter-spacing: -1.5px; }
+.setup-intro p { max-width: 570px; margin: 18px 0 0; color: var(--muted); font-size: 15px; }
+.setup-feedback { padding: 14px 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--muted); }
+.setup-feedback.error { border-color: #f2a3ac66; color: var(--red); }
+.setup-feedback.success { border-color: #57d6a055; color: var(--green); }
+.setup-steps { display: grid; gap: 16px; margin: 24px 0; padding: 0; list-style: none; }
+.setup-step { display: flex; gap: 20px; padding: 26px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); }
+.step-number { display: grid; flex: 0 0 32px; width: 32px; height: 32px; place-items: center; border: 1px solid #816eff66; border-radius: 50%; background: #816eff18; color: var(--accent-bright); font-size: 13px; font-weight: 650; }
+.setup-step.is-complete .step-number { border-color: #57d6a055; background: #57d6a012; color: var(--green); }
+.step-content { flex: 1; min-width: 0; }
+.step-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+.step-heading h2 { margin: 0; font-size: 20px; letter-spacing: -.4px; }
+.step-state { padding: 3px 9px; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); font-size: 11px; }
+.is-complete .step-state { color: var(--green); }
+.step-content p { margin: 0 0 14px; color: #bbc1d1; }
+.step-content strong { color: var(--text); font-weight: 600; }
+.step-content .step-hint, .step-hint { color: var(--muted); font-size: 12px; }
+.step-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; margin: 16px 0; }
+.step-actions a { font-size: 12px; }
+.step-content p:last-child { margin-bottom: 0; }
+.setup-footer { padding: 10px 0 0 78px; }
+.setup-footer strong { font-size: 18px; font-weight: 600; }
+.setup-footer p { margin: 6px 0 0; color: var(--muted); }
+.setup-footer .step-actions { margin-bottom: 14px; }
+.setup-footer button { min-width: 150px; }
+@media (max-width: 560px) {
+  .app-header { gap: 14px; padding: 16px 20px; }
+  .app-header .documentation-link { gap: 6px; font-size: 11px; }
+  .setup-shell { width: calc(100% - 32px); padding-top: 32px; }
+  .setup-step { gap: 12px; padding: 20px 16px; }
+  .step-number { flex-basis: 26px; width: 26px; height: 26px; }
+  .step-heading h2 { font-size: 18px; }
+  .setup-footer { padding-left: 0; }
+}

@@ -49,7 +49,9 @@ function renderLibrary(state) {
 
 function renderDiscord(response) {
   const authenticated = response.setup?.authenticated === true || response.delivery?.authenticated === true;
-  get('discord-state').textContent = authenticated ? 'Connected' : 'Optional';
+  const linked = response.delivery?.link?.paired === true;
+  // Discord sign-in is only optional when ChudPresence Link shares activity instead.
+  get('discord-state').textContent = authenticated ? 'Connected' : linked ? 'Optional' : 'Needed to share';
   get('discord-step').classList.toggle('is-complete', authenticated);
   discordButton.disabled = authenticated || connecting;
   discordButton.textContent = authenticated ? 'Discord connected' : connecting ? 'Waiting for Discord…' : 'Connect Discord';
@@ -90,7 +92,7 @@ enableButton.addEventListener('click', async () => {
     await message('ACTIVITY_RESTORE');
     const response = await message('ACTIVITY_LIBRARY_STATE');
     renderLibrary(response.result);
-    feedback(activityReady ? 'Activities enabled. Your first Activity is ready to try in step 2.'
+    feedback(activityReady ? 'Activities enabled. Your first Activity is ready to try in step 3.'
       : 'Permission granted. Open the Activity Library to check your first Activity.', activityReady ? 'success' : '');
   } catch (error) {
     feedback(`Could not finish enabling Activities. ${error.message} You can try again with the button below.`, 'error');

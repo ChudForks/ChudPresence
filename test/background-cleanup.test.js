@@ -47,7 +47,7 @@ async function createBackgroundHarness(activityPreferences = {}, {
   };
   const ready = vm.runInNewContext(`${source}\nensureActivityReady();`, {
     ...settings, ...activityPriority,
-    chrome, isFirefox: false, ActivityRegistry, createForegroundTracker, migratePlatformSettings,
+    chrome, isFirefox: false, browserApi: chrome, registerOnboarding() {}, ActivityRegistry, createForegroundTracker, migratePlatformSettings,
     createPresenceSession: options => createPresenceSession({ ...options, now }),
     Date: class extends Date { static now() { return now(); } },
     ActivityManager: class {
