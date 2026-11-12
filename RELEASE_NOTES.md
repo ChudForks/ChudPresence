@@ -22,6 +22,6 @@ by website and browser; immediate presence clearing cannot be guaranteed after
 a crash or network outage. See the [V2 security limits](extension/ACTIVITY_API_V2.md#security-limits-and-validation)
 for Activity access boundaries.
 
-See [installation instructions](README.md#install) for browser setup. Activity
+See [installation instructions](README.md#manual-installation) for browser setup. Activity
 packages update separately from the extension. Existing locally loaded
 Activities retain their stored source until you load updated package files.

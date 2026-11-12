@@ -1,6 +1,13 @@
+[![Install from Chrome Web Store](https://img.shields.io/badge/Chrome_Web_Store-Install-4285F4?style=for-the-badge&logo=googlechrome&logoColor=white)](https://chromewebstore.google.com/detail/chudpresence/kagippbmaednejgnhklkncjpniphbbbb)
+[![Install from Firefox Add-ons](https://img.shields.io/badge/Firefox_Add--ons-Install-FF7139?style=for-the-badge&logo=firefoxbrowser&logoColor=white)](https://addons.mozilla.org/en-US/firefox/addon/chudpresence/)
+
 # ChudPresence
 
-ChudPresence shares your browsing and playback activity on Discord through customizable Activities on Chromium and Firefox.
+**Your browsing and playback activity, on Discord.**
+
+Share what you’re watching, listening to, or doing through customizable Activities. Preview your activity locally, choose what appears, and connect Discord when you’re ready.
+
+[Explore features](#features) · [Manual installation](#manual-installation) · [ChudPresence Link](#chudpresence-link)
 
 ## Features
 
@@ -10,7 +17,7 @@ ChudPresence shares your browsing and playback activity on Discord through custo
 - Pair with ChudPresence Link for local Discord RPC and selective service settings sync with your phone.
 - Use Chromium 135 or newer, or Firefox 153 or newer.
 
-## Install
+## Manual installation
 
 Available packages are listed under [Releases](https://github.com/ChudForks/ChudPresence/releases).
 To load ChudPresence in Chromium:
