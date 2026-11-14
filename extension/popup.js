@@ -1,6 +1,7 @@
 import { browserApi, isFirefox, FIREFOX_ONBOARDING_KEY } from './platform/browser-api.js';
 import { DEFAULT_SETTINGS, normalizeSettings } from './core/settings.js';
 import { DEFAULT_ACTIVITY_PREFERENCES } from './core/activity-settings.js';
+import { renderActivitySites } from './activity-sites-ui.js';
 import { createPopupPriorityEditor } from './popup-priority.js';
 import { createPopupLink } from './popup-link.js';
 
@@ -39,6 +40,9 @@ const discordStatus = document.getElementById('discord-status');
 const activeServiceIcon = document.getElementById('active-service-icon');
 let lastState = null;
 let installedActivities = [];
+let currentActivityTab = null;
+const currentActivityTabReady = (globalThis.browser || globalThis.chrome).tabs?.query?.({ active: true, currentWindow: true })
+  .then(tabs => { currentActivityTab = tabs[0] || null; }).catch(() => {});
 let formHasLoaded = false;
 let saveTimer = 0;
 const priorityEditor = createPopupPriorityEditor({ document, sendMessage: activityMessage, onApplied: () => { void refresh(); } });
@@ -171,6 +175,10 @@ function renderInstalledActivitySettings(openActivityId = '') {
     statusSelect.dataset.activityId = activity.id;
     statusSelect.disabled = activity.enabled !== true;
     statusSelect.setAttribute('aria-label', `Status display for ${activity.name}`);
+    const servers = renderActivitySites({ document, activity, api: globalThis.browser || globalThis.chrome,
+      sendMessage: activityMessage, currentTab: currentActivityTab,
+      onChanged: () => refreshInstalledActivities(activity.id) });
+    if (servers) card.append(servers);
     container.append(card);
   }
 }
@@ -182,6 +190,7 @@ async function activityMessage(message) {
 }
 
 async function refreshInstalledActivities(openActivityId = '') {
+  await currentActivityTabReady;
   const priorityRevision = priorityEditor.revision;
   const state = await activityMessage({ type: 'ACTIVITY_LIBRARY_STATE' });
   installedActivities = Array.isArray(state?.installed) ? state.installed : [];

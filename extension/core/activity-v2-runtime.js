@@ -37,7 +37,11 @@ export function runActivityV2(config) {
       ? { url, signal: event.signal } : null;
   };
   const onNavigationError = () => { navigation = null; };
+  // Jellyfin and other SPAs bubble untrusted pagehide/pageshow view events to
+  // Window. Native transitions are trusted and, through the legacy target
+  // override, target the Document rather than Window, so check trust only.
   const onPageShow = (event) => {
+    if (event?.isTrusted !== true) return;
     window.removeEventListener('pageshow', onPageShow);
     if (!event.persisted || globalThis.__chudpresenceActivityGeneration !== config.capability) return;
     delete globalThis.__chudpresenceActivityGeneration;
@@ -79,11 +83,12 @@ export function runActivityV2(config) {
       // the old document is still present. Do not restart that ended document.
       // Explicit reload already removes this marker before reinjection.
       if (!documentEnded) delete globalThis.__chudpresenceActivityGeneration;
-      else window.addEventListener('pageshow', onPageShow, { once: true });
+      else window.addEventListener('pageshow', onPageShow);
       delete globalThis.__chudpresenceV2Stop;
     }
   };
-  const onPageHide = () => {
+  const onPageHide = (event) => {
+    if (event?.isTrusted !== true) return;
     if (!ended) void send('presence.clear', { closing: true,
       ...(navigation && !navigation.signal?.aborted ? { navigationUrl: navigation.url } : {}),
     }).catch(() => {});
@@ -138,8 +143,9 @@ export function runActivityV2(config) {
   window.addEventListener('focus', sendPageFocus);
   window.addEventListener('blur', sendPageFocus);
   document.addEventListener('visibilitychange', sendPageFocus);
-  // beforeunload can be canceled by the user. Retire only a departing document.
-  window.addEventListener('pagehide', onPageHide, { once: true });
+  // Custom SPA view events must neither retire the document nor consume this
+  // listener before the browser sends its native Window pagehide.
+  window.addEventListener('pagehide', onPageHide);
   window.navigation?.addEventListener('navigate', onNavigate);
   window.navigation?.addEventListener('navigateerror', onNavigationError);
   connect();

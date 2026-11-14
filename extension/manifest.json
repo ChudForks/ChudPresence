@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ChudPresence",
-  "version": "2.1.2",
+  "version": "2.1.3",
   "description": "Share your browsing and playback activity on Discord with customizable Activities.",
   "minimum_chrome_version": "135",
   "content_security_policy": {
@@ -27,8 +27,8 @@
     "service_worker": "background.js",
     "type": "module"
   },
-  "permissions": ["alarms", "identity", "offscreen", "storage", "userScripts"],
-  "optional_host_permissions": ["https://*/*"],
+  "permissions": ["alarms", "identity", "offscreen", "storage", "userScripts", "activeTab"],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
   "host_permissions": [
     "https://www.youtube.com/*",
     "https://youtube.com/*",

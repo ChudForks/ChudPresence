@@ -390,6 +390,10 @@
         }
       }
     },
+    "siteAccess": {
+      "const": "user-configured",
+      "description": "V1 only. Replace package matches with server base URLs explicitly approved in the extension. Requires extension 2.1.3."
+    },
     "pageAccess": {
       "type": "object",
       "additionalProperties": false,
@@ -688,5 +692,24 @@
         }
       ]
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "siteAccess"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "const": 1
+          },
+          "frames": {
+            "const": "top"
+          }
+        }
+      }
+    }
+  ]
 }

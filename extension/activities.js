@@ -1,7 +1,8 @@
 import { activityCatalogIconUrl, compareActivityVersions, downloadActivity, fetchCatalog, readCatalogCache } from './core/activity-repository.js';
 import { requestHostPermissions } from './core/activity-permissions.js';
+import { renderActivitySites } from './activity-sites-ui.js';
 import { diagnosticEntryCount, formatDeveloperDiagnostics } from './core/developer-diagnostics.js';
-import { isFirefox, USER_SCRIPTS_REQUIRED, USER_SCRIPTS_UNAVAILABLE, configureUserScriptsDialog, openUserScriptsSettings } from './platform/browser-api.js';
+import { isFirefox, browserName, extensionsPageUrl, USER_SCRIPTS_REQUIRED, USER_SCRIPTS_SETTINGS_HINT, USER_SCRIPTS_UNAVAILABLE, configureUserScriptsDialog, openUserScriptsSettings } from './platform/browser-api.js';
 import {
   MAX_ACTIVITY_ICON_BYTES,
   validateActivityIcon,
@@ -508,7 +509,7 @@ function renderInspector() {
   // actions intact unless the selected Activity's visible information changes.
   const metadataKey = JSON.stringify([currentView, data && [
     data.id, data.name, data.description, data.category, data.version, data.apiVersion,
-    data.matches, data.network, data.pageAccess, data.minExtensionVersion, data.icon, data.catalogSource,
+    data.matches, data.network, data.pageAccess, data.minExtensionVersion, data.icon, data.catalogSource, data.siteAccess, data.sites,
   ], record && [record.version, record.apiVersion, record.matches, record.network, record.enabled, record.status, record.source, record.error,
     record.compatibilityStatus, record.settings, record.settingValues], developerEnabled.checked]);
   if (metadataKey === inspectorRenderKey) return;
@@ -578,7 +579,12 @@ function renderInspector() {
   if (compatibility || record?.error || record?.compatibilityStatus) {
     detail.append(element('p', 'notice error', compatibility || record.error || record.compatibilityStatus));
   }
-  if (record) renderActivitySettings(record, configuration);
+  if (record) {
+    const servers = renderActivitySites({ document, activity: record, api, sendMessage: extensionMessage,
+      onChanged: () => refreshInstalled() });
+    if (servers) configuration.append(servers);
+    renderActivitySettings(record, configuration);
+  }
   const information = inspectorSection('Package details', 'package');
   const metadata = element('dl', 'inspector-metadata');
   const fields = [
@@ -598,6 +604,8 @@ function renderInspector() {
   const websites = inspectorSection('Supported websites', 'websites');
   const sites = element('ul', 'inspector-sites');
   for (const match of data.matches || []) sites.append(element('li', '', match));
+  if (data.siteAccess === 'user-configured') websites.append(element('p', 'access-explanation',
+    'Runs only on servers you add. After installing, open your server and choose Enable ' + data.name + ' on this site in the popup, or add its URL here.'));
   websites.append(sites);
   configuration.append(websites);
   const access = inspectorSection('Access & privacy', 'access');
@@ -620,7 +628,9 @@ function renderInspector() {
     for (const origin of data.network) origins.append(element('li', '', origin));
     access.append(origins);
   }
-  access.append(element('p', 'access-explanation', 'Installation and enabling request browser access to the declared websites and network origins. Activity reports are checked before becoming Discord Rich Presence.'));
+  access.append(element('p', 'access-explanation', data.siteAccess === 'user-configured'
+    ? 'Adding a server requests access to that website. Browser site permission covers its hostname; this Activity also checks the saved protocol, port, and base path. No discovery runs on other websites.'
+    : 'Installation and enabling request browser access to the declared websites and network origins. Activity reports are checked before becoming Discord Rich Presence.'));
   columns.append(configuration, access);
   detail.append(columns);
   const disclosure = detail.querySelector('.card-page-access');
@@ -884,7 +894,7 @@ async function refreshInstalled({ polling = false } = {}) {
   const revision = ++libraryRefreshRevision;
   const state = await extensionMessage({ type: 'ACTIVITY_LIBRARY_STATE' });
   if (revision !== libraryRefreshRevision) return;
-  if (polling && document.activeElement?.closest('.activity-settings')) return;
+  if (polling && (document.activeElement?.closest('.activity-settings') || document.activeElement?.closest('.activity-sites'))) return;
   installed = state.installed || [];
   libraryDiagnostics = {
     grantedOrigins: state.grantedOrigins || [],
@@ -962,7 +972,7 @@ async function ensureActivityPermissions(matches, noticeElement = catalogNotice)
     return true;
   }
   if (!userScriptsAvailable || !api.userScripts?.execute) {
-    const message = 'Activity scripts are unavailable. In Chrome 138 or newer, open this extension’s details and turn on Allow User Scripts, then reload this page.';
+    const message = `Activity scripts are unavailable in ${browserName}. ${USER_SCRIPTS_SETTINGS_HINT} Then reload this page.`;
     if (noticeElement) setNotice(noticeElement, message, 'error');
     showUserScriptsDialog();
     throw new Error(message);
@@ -973,9 +983,15 @@ async function ensureActivityPermissions(matches, noticeElement = catalogNotice)
   return true;
 }
 
+function requestedActivityOrigins(activity) {
+  const matches = activity.siteAccess === 'user-configured'
+    ? installed.find(record => record.id === activity.id)?.matches || [] : activity.matches || [];
+  return [...matches, ...(activity.network || [])];
+}
+
 async function installPackage(activityPackage) {
   if (!await ensureActivityPermissions(
-    [...activityPackage.metadata.matches, ...(activityPackage.metadata.network || [])],
+    requestedActivityOrigins(activityPackage.metadata),
     developerNotice,
   )) return null;
   const result = await extensionMessage({ type: 'ACTIVITY_INSTALL', activityPackage });
@@ -988,17 +1004,14 @@ async function installRepositoryActivity(entry, { stayInView = false } = {}) {
     const compatibility = compatibilityMessage(entry);
     if (compatibility) throw new Error(compatibility);
     // Request declared site access from this click before downloading the package.
-    if (!await ensureActivityPermissions([
-      ...entry.matches,
-      ...(entry.network || []),
-    ])) return;
+    if (!await ensureActivityPermissions(requestedActivityOrigins(entry))) return;
     setNotice(catalogNotice, `Downloading ${entry.name}…`);
     let activityPackage;
     try {
       activityPackage = await downloadActivity(entry.id, catalog);
     } catch (error) {
       if (error.code !== 'catalog_metadata_mismatch') throw error;
-      const previousOrigins = [...entry.matches, ...(entry.network || [])].sort();
+      const previousOrigins = requestedActivityOrigins(entry).sort();
       const refreshed = await fetchCatalog({ force: true });
       catalog = refreshed.catalog;
       describeCatalog(false, refreshed.fetchedAt);
@@ -1006,7 +1019,7 @@ async function installRepositoryActivity(entry, { stayInView = false } = {}) {
       renderAll();
       const updatedEntry = catalog.activities.find((item) => item.id === entry.id);
       if (!updatedEntry) throw new Error(`${entry.name} is no longer in the catalog.`);
-      const updatedOrigins = [...updatedEntry.matches, ...(updatedEntry.network || [])].sort();
+      const updatedOrigins = requestedActivityOrigins(updatedEntry).sort();
       if (JSON.stringify(previousOrigins) !== JSON.stringify(updatedOrigins)) {
         throw new Error('The Activity permissions changed. Review the updated catalog entry and install again.');
       }
@@ -1173,7 +1186,7 @@ async function initialize() {
     } catch (error) {
       const message = isFirefox
         ? `Activities are still off. Choose Set up Activities above to try again. ${error.message || USER_SCRIPTS_UNAVAILABLE}`
-        : 'Chrome could not open extension settings automatically. Open chrome://extensions, choose this extension’s Details, and turn on Allow User Scripts.';
+        : `${browserName} could not open extension settings automatically. Open ${extensionsPageUrl}. ${USER_SCRIPTS_SETTINGS_HINT}`;
       setLibraryStatus(message, 'error');
       userScriptsDialog.close();
     }

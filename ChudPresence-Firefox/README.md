@@ -33,6 +33,14 @@ package; the production candidate is not published by that workflow.
 
 ## Activities and permissions
 
+The official Jellyfin V1 Activity requires extension 2.1.3 or newer. Install it
+from Activity Library, open Jellyfin Web, and choose **Enable Jellyfin on this
+site** in its popup service settings. Alternatively, add its HTTP/HTTPS server
+base URL in Activity Library. Approve that site's permission once. Jellyfin
+checks only added servers while enabled; installing it alone starts no page
+detection. Server locations stay local and survive Activity updates. See the
+[Jellyfin setup guide](../README.md#jellyfin) for playback and artwork options.
+
 On first installation, a **Welcome to ChudPresence** tab opens automatically:
 
 1. Choose **Enable Activities**. In Firefox's **User Scripts** request, review

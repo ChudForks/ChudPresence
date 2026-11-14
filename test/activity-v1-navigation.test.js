@@ -21,10 +21,14 @@ async function runtime({ optIn = true, isTop = true } = {}) {
     code: `globalThis.starts = (globalThis.starts || 0) + 1; globalThis.api = ChudPresence;
       ChudPresence.lifecycle.onCleanup(() => { void ChudPresence.clear(); });`,
   });
-  const events = new Map(), navigation = new Map(), requests = [];
+  const events = new Map(), navigation = new Map(), requests = [], once = new Set();
   const window = {
     location: { href: 'https://example.com/home' },
-    addEventListener(name, callback) { if (!events.has(name)) events.set(name, new Set()); events.get(name).add(callback); },
+    addEventListener(name, callback, options) {
+      if (!events.has(name)) events.set(name, new Set());
+      events.get(name).add(callback);
+      if (options?.once) once.add(callback);
+    },
     removeEventListener(name, callback) { events.get(name)?.delete(callback); },
     navigation: {
       addEventListener(name, callback) { if (!navigation.has(name)) navigation.set(name, new Set()); navigation.get(name).add(callback); },
@@ -33,15 +37,21 @@ async function runtime({ optIn = true, isTop = true } = {}) {
     setTimeout: () => 1, setInterval: () => 2, clearTimeout() {}, clearInterval() {},
   };
   window.top = isTop ? window : {};
-  const context = vm.createContext({ window, location: window.location, URL, AbortController,
-    document: { querySelectorAll: () => [], addEventListener() {}, removeEventListener() {} },
+  const document = { querySelectorAll: () => [], addEventListener() {}, removeEventListener() {} };
+  const context = vm.createContext({ window, location: window.location, URL, AbortController, document,
     chrome: { runtime: { async sendMessage(request) { requests.push(request); return { ok: true, data: {} }; },
       connect: () => ({ onMessage: { addListener() {} }, onDisconnect: { addListener() {} }, disconnect() {} }) } } });
   const run = () => vm.runInContext(script, context);
   run();
   return { window, requests, run, navigation,
     navigate(event) { for (const callback of [...navigation.get('navigate') || []]) callback(event); },
-    event(name, event = {}) { for (const callback of [...events.get(name) || []]) callback(event); },
+    event(name, event = {}) {
+      for (const callback of [...events.get(name) || []]) {
+        if (once.has(callback)) events.get(name).delete(callback);
+        // Native page transitions target the Document (legacy target override).
+        callback({ type: name, target: document, isTrusted: true, ...event });
+      }
+    },
     error() { for (const callback of [...navigation.get('navigateerror') || []]) callback(); },
   };
 }
@@ -66,6 +76,24 @@ test('V1 sends a closing navigation hint only for an opted-in valid top-document
     assert.equal(fixture.window.api.lifecycle.signal.aborted, true);
     assert.ok([...fixture.navigation.values()].every(listeners => listeners.size === 0));
   }
+});
+
+test('V1 ignores Jellyfin view lifecycle events and retains native pagehide/pageshow listeners', async () => {
+  const fixture = await runtime();
+  fixture.event('pagehide', { target: {}, isTrusted: false });
+  fixture.event('pagehide', { isTrusted: false });
+  assert.equal(fixture.window.api.lifecycle.signal.aborted, false);
+  assert.equal(fixture.requests.length, 0);
+  fixture.event('pagehide');
+  assert.equal(fixture.window.api.lifecycle.signal.aborted, true);
+  const count = fixture.requests.length;
+  fixture.event('pageshow', { target: {}, isTrusted: false, persisted: true });
+  fixture.event('pageshow', { isTrusted: false, persisted: true });
+  assert.equal(fixture.window.starts, 1);
+  fixture.event('pageshow', { persisted: true });
+  assert.equal(fixture.window.starts, 2);
+  assert.equal(fixture.requests.length, count);
+  assert.equal(fixture.window.api.lifecycle.signal.aborted, false);
 });
 
 test('V1 navigation prevents premature focus clears, reinjection and duplicate exit clears but restores from bfcache', async () => {

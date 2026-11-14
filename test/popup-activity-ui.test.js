@@ -7,6 +7,7 @@ import { DEFAULT_SETTINGS } from '../extension/core/settings.js';
 import { DEFAULT_ACTIVITY_PRIORITY_RULES, normalizeActivityPriorityRules } from '../extension/core/activity-priority.js';
 import { createPopupPriorityEditor } from '../extension/popup-priority.js';
 import { createPopupLink } from '../extension/popup-link.js';
+import { renderActivitySites } from '../extension/activity-sites-ui.js';
 
 class FakeClassList {
   constructor(element) { this.element = element; }
@@ -358,8 +359,10 @@ async function createPopupHarness({ activities = [], state = {}, rejectNext = nu
     __activitySettings: activitySettingsModule,
     createPopupPriorityEditor,
     createPopupLink,
+    renderActivitySites,
   });
   const executableSource = source
+    .replace("import { renderActivitySites } from './activity-sites-ui.js';", '')
     .replace("import { createPopupLink } from './popup-link.js';", '')
     .replace("import { createPopupPriorityEditor } from './popup-priority.js';", '')
     .replace(/^import \{[^}]+\} from '\.\/platform\/browser-api.js';\r?\n/gm, '')

@@ -10,6 +10,7 @@ import {
 import { ACTIVITY_KIND_VALUES } from './activity-contract.generated.js';
 import { MAX_ACTIVITY_ICON_BYTES, MAX_ACTIVITY_METADATA_BYTES } from './activity-contract.generated.js';
 import { validateActivityV2PageAccess } from './activity-v2-page.js';
+import { hasConfiguredSiteAccess } from './activity-sites.js';
 
 export const ACTIVITY_REPOSITORIES = Object.freeze([
   'ChudPresence-Activities',
@@ -123,6 +124,10 @@ export function validateCatalog(value) {
         !Array.isArray(entry.matches) || entry.matches.length < 1 || entry.matches.length > 32 ||
         new Set(entry.matches).size !== entry.matches.length || !entry.matches.every(validateMatchPattern)) {
       throw new Error(`The catalog entry for ${entry.id} is missing required display or API fields.`);
+    }
+    if (entry.siteAccess !== undefined && (!hasConfiguredSiteAccess(entry) ||
+        (entry.frames !== undefined && entry.frames !== 'top'))) {
+      throw new Error(`The catalog entry for ${entry.id} has invalid user-configured site access.`);
     }
     if (entry.minExtensionVersion !== undefined && !isSemanticVersion(entry.minExtensionVersion)) {
       throw new Error(`The catalog entry for ${entry.id} has an invalid minimum extension version.`);
@@ -374,7 +379,7 @@ export async function downloadActivity(activityId, catalog) {
   const comparableFields = ['name', 'description', 'version', 'apiVersion', 'minExtensionVersion', 'matches',
     'category', 'aliases', 'tags', 'excludeMatches', 'author', 'contributors',
     'serviceUrl', 'homepage', 'repository', 'presence', 'defaultMediaKind',
-    'frames', 'network', 'settings', 'settingsUi', 'pageAccess'];
+    'frames', 'network', 'settings', 'settingsUi', 'pageAccess', 'siteAccess'];
   const mismatch = comparableFields.find((field) =>
     canonicalJson(packageMetadata[field]) !== canonicalJson(entry[field]));
   if (!isSupportedActivityApiVersion(metadata.apiVersion) || metadata.id !== entry.id ||

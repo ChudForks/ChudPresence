@@ -449,7 +449,7 @@ test('provides a frozen ChudPresence runtime with report, page, and network help
   assert.equal(runtimePort.name,
     `chudpresence-activity-v1:sample-activity:1.0.0:${installedCapability}`);
   t.after(() => {
-    for (const listener of eventListeners.get('pagehide') || []) listener({ type: 'pagehide' });
+    for (const listener of eventListeners.get('pagehide') || []) listener({ type: 'pagehide', target: document, isTrusted: true });
   });
 
   const api = pageWindow.__capturedPresence;
@@ -656,7 +656,7 @@ test('provides a frozen ChudPresence runtime with report, page, and network help
   assert.equal(observers.size, 0);
   await new Promise((resolve) => setTimeout(resolve, 18));
   assert.equal(pageWindow.__ticks, ticksAtTeardown);
-  for (const listener of eventListeners.get('pagehide') || []) listener({ type: 'pagehide' });
+  for (const listener of eventListeners.get('pagehide') || []) listener({ type: 'pagehide', target: document, isTrusted: true });
   assert.equal(pageWindow.__cleanupCount, 1);
 });
 
@@ -1937,11 +1937,12 @@ test('document exit clears before Activity cleanup and forwards immediate closin
   pageWindow.top = pageWindow;
   pageWindow.window = pageWindow;
   pageWindow.self = pageWindow;
+  const pageDocument = { querySelectorAll: () => [], addEventListener() {}, removeEventListener() {} };
   vm.runInNewContext(fake.scripts.get('chudpresence-activity-sample-activity').js[0].code, {
     window: pageWindow,
     location: pageWindow.location,
     history: pageWindow.history,
-    document: { querySelectorAll: () => [], addEventListener() {}, removeEventListener() {} },
+    document: pageDocument,
     chrome: { runtime: {
       sendMessage(message) {
         requests.push(structuredClone(message));
@@ -1953,7 +1954,7 @@ test('document exit clears before Activity cleanup and forwards immediate closin
     } },
     AbortController, URL, console,
   });
-  for (const listener of listeners.get('pagehide')) listener();
+  for (const listener of listeners.get('pagehide')) listener({ target: pageDocument, isTrusted: true });
   await Promise.all(completions);
   assert.equal(requests[0].operation, 'presence.clear');
   assert.deepEqual(requests[0].payload, { closing: true });

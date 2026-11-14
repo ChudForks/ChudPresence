@@ -10,7 +10,7 @@ const response = (body, status = 200, headers = {}) => ({ ok: status >= 200 && s
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 
 function harness({ enabled = true, stored = {}, onFetch, applyFailure = false, prepareNetwork, modern = false,
-  fields = LINK_SETTING_FIELDS } = {}) {
+  fields = LINK_SETTING_FIELDS, origin = '' } = {}) {
   const local = structuredClone(stored);
   const calls = [];
   const applications = [];
@@ -33,7 +33,7 @@ function harness({ enabled = true, stored = {}, onFetch, applyFailure = false, p
     get: async key => ({ [key]: structuredClone(local[key]) }),
     set: async value => Object.assign(local, structuredClone(value)),
   };
-  const options = { storage, prepareNetwork, now: () => now, fetch: async (url, request) => {
+  const options = { storage, prepareNetwork, origin, now: () => now, fetch: async (url, request) => {
     assert.equal(request.mode, 'cors');
     const path = new URL(url).pathname;
     const call = { path, method: request.method, headers: request.headers,
@@ -47,7 +47,7 @@ function harness({ enabled = true, stored = {}, onFetch, applyFailure = false, p
         ...(modern ? ['service-settings-sync', 'selective-settings-sync'] : [])] });
     if (path === '/v1/pair') return response({ serverId: server.id, protocolVersion: 1, deviceId: 'browser', token });
     assert.equal(request.headers.Authorization, `Bearer ${token}`);
-    assert.equal(Object.hasOwn(request.headers, 'Origin'), false);
+    assert.equal(request.headers.Origin, origin || undefined);
     if (server.unauthorized) return response({ error: 'unauthorized' }, 401);
     if (path === '/v1/device') return response(null, 204);
     if (path === '/v1/services') return response(discovery());
@@ -322,6 +322,32 @@ test('Link removes only the legacy localhost grant before using the server CORS 
     assert.deepEqual(removed, granted ? [{ origins: [LINK_HOST_PERMISSION] }] : []);
   }
   await prepareLinkNetwork({});
+});
+
+test('Link preserves a loopback grant used by an approved self-hosted Activity, even while disabled', async () => {
+  let removed = false;
+  await prepareLinkNetwork({ permissions: {
+    async contains() { return true; }, async remove() { removed = true; },
+  }, storage: { local: { async get() { return { installedActivities: { jellyfin: {
+    metadata: { apiVersion: 1, siteAccess: 'user-configured' }, enabled: false,
+    sites: ['http://127.0.0.1:8096/jellyfin/'],
+  } } }; } } } });
+  assert.equal(removed, false);
+});
+
+test('Link keeps browser identity on GETs when another Activity needs loopback host permission', async () => {
+  const origin = 'chrome-extension://test-extension';
+  const h = harness({ origin });
+  await h.client.pair(pairing);
+  await h.client.sync();
+  assert.ok(h.calls.some(call => call.method === 'GET'));
+  assert.ok(h.calls.every(call => call.headers.Origin === origin));
+});
+
+test('a required development host grant cannot prevent Link initialization', async () => {
+  await prepareLinkNetwork({ permissions: {
+    async contains() { return true; }, async remove() { throw new Error('You cannot remove required permissions.'); },
+  } });
 });
 
 test('Link waits for permission migration and restores a saved token without pairing again', async () => {

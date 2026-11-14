@@ -31,6 +31,27 @@ Playback detection and the local preview work without Discord. Connect Discord f
 
 Each Activity's **Playback progress** setting shows elapsed and remaining playback time when enabled. Turn it off to show continuous app elapsed time across songs, videos, seeking, and pauses. The app timer starts a new session when presence clears or switches to another Activity.
 
+## Jellyfin
+
+Install **Jellyfin** from Activity Library, then open your Jellyfin Web server.
+Open ChudPresence, select Jellyfin's service settings, and choose **Enable
+Jellyfin on this site**. Approve the website permission once. Alternatively,
+select Jellyfin in Activity Library and add its server base URL, such as
+`http://192.168.1.10:8096/` or `https://media.example.com/jellyfin/`.
+
+Jellyfin is an official V1 Activity and requires extension 2.1.3 or newer. It
+checks only the servers you add, while the Activity is enabled. Installing it
+alone starts no webpage detection. Server addresses stay local and survive
+Activity updates. Remove individual servers in the popup or Activity Library.
+
+Movies, episodes, music, and live TV use the current browser's playback.
+Jellyfin-specific browsing, privacy, and category settings are in Activity
+Library. The existing progress, pause, artwork, and button controls also apply.
+Artwork defaults to the Jellyfin logo. **Use public server artwork** can share
+token-free HTTPS poster URLs from a public server; private artwork is not
+uploaded. This integration supports Jellyfin Web, not native clients or remote
+players controlled from another device.
+
 ## ChudPresence Link
 
 Open the chain-link tab in the popup. In the ChudPresence Link desktop app on this PC, choose **Pair browser**, then enter its eight-digit code and a browser name in the extension. The default local port is `17879`; **Connection options** supports a custom port.

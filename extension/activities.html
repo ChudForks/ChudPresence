@@ -6,6 +6,7 @@
     <meta name="color-scheme" content="dark" />
     <title>Activity Library · ChudPresence</title>
     <link rel="stylesheet" href="activities.css" />
+    <link rel="stylesheet" href="activity-sites.css" />
   </head>
   <body>
     <header class="app-header">
@@ -123,17 +124,17 @@
     <dialog class="user-scripts-dialog" id="user-scripts-dialog" aria-labelledby="user-scripts-title">
       <div class="dialog-content">
         <span class="dialog-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 22s8-3.7 8-10V5l-8-3-8 3v7c0 6.3 8 10 8 10Z"/><path d="M12 8v5m0 3h.01"/></svg></span>
-        <span class="eyebrow">One-time Chrome setting</span>
+        <span class="eyebrow">One-time <span data-browser-name>browser</span> setting</span>
         <h2 id="user-scripts-title">Allow Activity scripts</h2>
-        <p>Chrome is blocking Activity scripts until you enable the required setting for this extension.</p>
+        <p><span data-browser-name>Your browser</span> is blocking Activity scripts until you enable the required setting for this extension.</p>
         <ol>
-          <li>Open Chrome’s Extensions page.</li>
-          <li>Chrome 138 or newer: open this extension’s Details and turn on <strong>Allow User Scripts</strong>. Earlier versions: turn on <strong>Developer mode</strong>.</li>
+          <li>Open <span data-browser-name>your browser</span>’s Extensions page at <strong data-extensions-page>the extensions address</strong>.</li>
+          <li>Open this extension’s Details and turn on <strong>Allow User Scripts</strong>. If that setting is missing in an older browser version, turn on <strong>Developer mode</strong> on the Extensions page instead.</li>
           <li>Return here and reload the Activity Library.</li>
         </ol>
         <div class="dialog-actions">
           <button class="button secondary" id="close-user-scripts-dialog" type="button">Close</button>
-          <button class="button primary" id="open-extension-details" type="button">Open Chrome Extensions</button>
+          <button class="button primary" id="open-extension-details" type="button">Open browser Extensions</button>
         </div>
       </div>
     </dialog>

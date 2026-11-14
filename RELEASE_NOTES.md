@@ -1,3 +1,17 @@
+# ChudPresence 2.1.3
+
+- Setup and Activity Library guidance now use Chrome, Brave, or Edge names
+  and extension settings addresses to match the current browser.
+- Added support for the official Jellyfin V1 Activity, including HTTP/HTTPS
+  server setup from the popup or Activity Library. It runs only on servers
+  explicitly added by the user while the Activity is enabled; installation
+  alone starts no page detection.
+- Saved server scopes preserve protocol, port, and reverse-proxy base paths,
+  survive Activity updates, and can be removed individually. Existing static
+  Activity matches and V2 restrictions remain compatible.
+- Kept ChudPresence Link's browser identity intact when an approved local
+  Jellyfin server needs loopback website permission.
+
 # ChudPresence 2.1.2
 
 - Added a first-run setup page for Chromium browsers. It opens on first install and guides you through allowing User Scripts, connecting Discord, and trying the included YouTube Activity.

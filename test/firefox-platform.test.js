@@ -8,7 +8,7 @@ const source = (await readFile(new URL('../extension/platform/browser-api.js', i
 
 function platform({ browser, chrome, ...environment }) {
   const context = vm.createContext({ browser, chrome, ...environment });
-  vm.runInContext(`${source}\nglobalThis.platform = { browserApi, isFirefox, isBackgroundSuspending, openUserScriptsSettings, registerFirefoxOnboarding };`, context);
+  vm.runInContext(`${source}\nglobalThis.platform = { browserApi, isFirefox, browserName, extensionsPageUrl, USER_SCRIPTS_REQUIRED, USER_SCRIPTS_UNAVAILABLE, configureUserScriptsDialog, isBackgroundSuspending, openUserScriptsSettings, registerFirefoxOnboarding };`, context);
   return { ...context.platform, context };
 }
 
@@ -19,9 +19,42 @@ test('Firefox routes shared chrome call sites through the native Promise browser
   const callbackApi = { storage: { local: { get() { assert.fail('Legacy callback API selected'); } } } };
   const harness = platform({ browser: promiseApi, chrome: callbackApi });
   assert.equal(harness.isFirefox, true);
+  assert.equal(harness.browserName, 'Firefox');
   assert.equal(harness.browserApi, promiseApi);
   assert.equal(harness.context.chrome, promiseApi);
   assert.deepEqual(await harness.context.chrome.storage.local.get('enabled'), { enabled: false });
+});
+
+test('Chromium branding distinguishes shared engine brands, legacy user agents, and an unidentified browser', async () => {
+  for (const [navigator, name, scheme] of [
+    [{ userAgentData: { brands: [{ brand: 'Chromium' }, { brand: 'Not A Brand' }, { brand: 'Google Chrome' }] } }, 'Chrome', 'chrome'],
+    [{ userAgentData: { brands: [{ brand: 'Chromium' }, { brand: 'Brave' }] } }, 'Brave', 'brave'],
+    [{ userAgentData: { brands: [{ brand: 'Chromium' }, { brand: 'Microsoft Edge' }] } }, 'Edge', 'edge'],
+    [{ userAgent: 'Chrome/142.0.0.0 Edg/142.0.0.0' }, 'Edge', 'edge'],
+    [{ userAgent: 'Chrome/142.0.0.0' }, 'Chrome', 'chrome'],
+    [{ userAgent: 'Chrome/142.0.0.0', userAgentData: { brands: [{ brand: 'Chromium' }] } }, 'Chromium', 'chrome'],
+    [{}, 'Chromium', 'chrome'],
+  ]) {
+    const opened = [];
+    const chrome = { runtime: { id: 'extension id' }, tabs: { async create(options) { opened.push(options); } } };
+    const harness = platform({ chrome, navigator });
+    assert.equal(harness.browserName, name);
+    assert.equal(harness.extensionsPageUrl, `${scheme}://extensions`);
+    assert.equal(harness.USER_SCRIPTS_REQUIRED, `Allow User Scripts in ${name} settings`);
+    assert.ok(harness.USER_SCRIPTS_UNAVAILABLE.startsWith(`${name} does not expose`));
+    await harness.openUserScriptsSettings();
+    assert.equal(opened[0].url, `${scheme}://extensions/?id=extension%20id`);
+    const browserLabels = [{}, {}];
+    const addressLabels = [{}];
+    const button = {};
+    harness.configureUserScriptsDialog({
+      querySelectorAll: selector => selector === '[data-browser-name]' ? browserLabels : addressLabels,
+      getElementById: id => { assert.equal(id, 'open-extension-details'); return button; },
+    });
+    assert.deepEqual(browserLabels.map(label => label.textContent), [name, name]);
+    assert.equal(addressLabels[0].textContent, `${scheme}://extensions`);
+    assert.equal(button.textContent, `Open ${name} Extensions`);
+  }
 });
 
 test('Firefox requests optional User Scripts permission during the user gesture and preserves its outcome', async () => {

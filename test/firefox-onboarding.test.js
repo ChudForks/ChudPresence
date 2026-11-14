@@ -3,24 +3,29 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
 
-const [source, html] = await Promise.all([
+const [guideSource, source, html] = await Promise.all([
+  readFile(new URL('../extension/setup-guide.js', import.meta.url), 'utf8'),
   readFile(new URL('../ChudPresence-Firefox/extension/welcome.js', import.meta.url), 'utf8'),
   readFile(new URL('../ChudPresence-Firefox/extension/welcome.html', import.meta.url), 'utf8'),
 ]);
 const readyYouTube = { id: 'youtube', name: 'YouTube', enabled: true, status: 'waiting' };
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
-async function welcome({ allowed = false, installed = [], authenticated = false } = {}) {
+async function welcome({ allowed = false, installed = [], authenticated = false, linked = false } = {}) {
   const elements = new Map([...html.matchAll(/\bid="([^"]+)"/g)].map(([, id]) => [id, {
-    textContent: '', disabled: true, listeners: new Map(),
+    textContent: '', disabled: true, hidden: false, attributes: new Map(), listeners: new Map(), focusCalls: [], scrollCalls: [],
     addEventListener(type, callback) { this.listeners.set(type, callback); },
-    classList: { toggle() {} },
+    setAttribute(name, value) { this.attributes.set(name, value); },
+    removeAttribute(name) { this.attributes.delete(name); },
+    focus(options) { this.focusCalls.push(structuredClone(options)); },
+    scrollIntoView(options) { this.scrollCalls.push(structuredClone(options)); },
+    classList: { values: new Set(), toggle(name, enabled) { if (enabled) this.values.add(name); else this.values.delete(name); } },
   }]));
   const focusListeners = new Map();
   const calls = [];
   const writes = [];
   const tabs = [];
-  const state = { allowed, installed, authenticated, grant: true, stateError: '', restoreError: '', discordError: '', storageError: '' };
+  const state = { allowed, installed, authenticated, linked, grant: true, stateError: '', restoreError: '', discordError: '', storageError: '' };
   const api = {
     runtime: { async sendMessage({ type }) {
       calls.push(type);
@@ -37,7 +42,7 @@ async function welcome({ allowed = false, installed = [], authenticated = false 
         if (state.discordError) return { ok: false, error: state.discordError };
         state.authenticated = true;
       }
-      return { ok: true, setup: { authenticated: state.authenticated } };
+      return { ok: true, setup: { authenticated: state.authenticated }, delivery: { link: { paired: state.linked } } };
     } },
     permissions: { request(query) {
       assert.deepEqual(Array.from(query.permissions), ['userScripts']);
@@ -59,6 +64,7 @@ async function welcome({ allowed = false, installed = [], authenticated = false 
     window: { addEventListener(type, callback) { focusListeners.set(type, callback); } },
     openUserScriptsSettings: api => api.permissions.request({ permissions: ['userScripts'] }),
   });
+  vm.runInContext(guideSource.replace(/^export /gm, ''), context);
   vm.runInContext(source.replace(/^import .*;\r?\n/gm, ''), context);
   await flush();
   return { elements, state, calls, writes, tabs, location,
@@ -175,4 +181,90 @@ test('permission, restore, and storage failures leave their actions retryable', 
   ui.state.storageError = '';
   await ui.click('finish-setup');
   assert.equal(ui.location.href, 'activities.html?view=installed');
+});
+
+test('the Firefox wizard stays on the permission panel while enabling and can continue with local preview', async () => {
+  const ui = await welcome();
+  await ui.click('setup-next');
+  assert.equal(ui.elements.get('setup-next').disabled, true);
+  await ui.click('setup-next');
+  assert.equal(ui.elements.get('setup-wizard').attributes.get('data-step'), 'permission');
+  await ui.click('enable-activities');
+  assert.equal(ui.elements.get('setup-wizard').attributes.get('data-step'), 'permission');
+  assert.equal(ui.elements.get('setup-next').disabled, false);
+  assert.equal(ui.elements.get('permission-title').focusCalls.length, 1);
+  assert.equal(ui.elements.get('permission-title').scrollCalls.length, 1);
+  await ui.click('setup-next');
+  assert.equal(ui.elements.get('setup-next').textContent, 'Use local preview');
+  await ui.click('setup-next');
+  assert.equal(ui.elements.get('finish-setup').hidden, false);
+  assert.equal(ui.elements.get('setup-next').hidden, true);
+  assert.equal(ui.calls.includes('CONNECT_DISCORD'), false);
+  ui.state.allowed = false;
+  await ui.focus();
+  assert.equal(ui.elements.get('setup-wizard').attributes.get('data-step'), 'activity');
+  assert.equal(ui.elements.get('finish-setup').disabled, true);
+  assert.doesNotMatch(ui.elements.get('activity-description').textContent, /ready to try/);
+  await ui.click('setup-back');
+  await ui.click('setup-back');
+  assert.equal(ui.elements.get('setup-next').disabled, true);
+  assert.deepEqual(ui.elements.get('permission-title').focusCalls.at(-1), { preventScroll: true });
+});
+
+test('the Firefox wizard updates Discord navigation after sign-in without taking over focus', async () => {
+  const ui = await welcome({ allowed: true, installed: [readyYouTube] });
+  await ui.click('setup-nav-discord');
+  await ui.click('connect-discord');
+  assert.equal(ui.elements.get('setup-wizard').attributes.get('data-step'), 'discord');
+  assert.equal(ui.elements.get('setup-next').textContent, 'Try your first Activity');
+  assert.equal(ui.elements.get('discord-title').focusCalls.length, 1);
+  assert.equal(ui.elements.get('discord-title').scrollCalls.length, 1);
+  assert.match(ui.elements.get('finish-description').textContent, /sharing connection is ready/);
+  ui.state.authenticated = false;
+  await ui.focus();
+  assert.match(ui.elements.get('discord-feedback').textContent, /disconnected/);
+  assert.match(ui.elements.get('finish-description').textContent, /Connect Discord or pair Link/);
+  assert.equal(ui.elements.get('setup-next').textContent, 'Use local preview');
+});
+
+test('the Firefox wizard recognizes an existing paired Link sharing route', async () => {
+  const ui = await welcome({ allowed: true, installed: [readyYouTube], linked: true });
+  await ui.click('setup-nav-discord');
+  assert.equal(ui.elements.get('discord-state').textContent, 'Optional');
+  assert.equal(ui.elements.get('setup-next').textContent, 'Try your first Activity');
+  assert.equal(ui.elements.get('setup-nav-discord').classList.values.has('is-complete'), true);
+  assert.match(ui.elements.get('finish-description').textContent, /sharing connection is ready/);
+  ui.state.linked = false;
+  await ui.focus();
+  assert.match(ui.elements.get('discord-feedback').textContent, /disconnected/);
+  assert.equal(ui.elements.get('setup-next').textContent, 'Use local preview');
+});
+
+test('a failed Firefox refresh clears cached readiness while preserving the chosen panel', async () => {
+  const ui = await welcome({ allowed: true, installed: [readyYouTube] });
+  await ui.click('setup-nav-permission');
+  ui.state.stateError = 'Worker unavailable';
+  await ui.focus();
+  assert.equal(ui.elements.get('setup-wizard').attributes.get('data-step'), 'permission');
+  assert.equal(ui.elements.get('setup-next').disabled, true);
+  assert.equal(ui.elements.get('finish-setup').disabled, true);
+  assert.equal(ui.elements.get('try-youtube').disabled, true);
+  assert.equal(ui.elements.get('permission-title').scrollCalls.length, 1);
+  assert.equal(ui.elements.get('permission-state').textContent, 'Check needed');
+  ui.state.stateError = '';
+  await ui.focus();
+  assert.equal(ui.elements.get('setup-next').disabled, false);
+  assert.equal(ui.elements.get('finish-setup').disabled, false);
+});
+
+test('a paired Link does not overwrite a failed Discord sign-in with a success message', async () => {
+  const ui = await welcome({ allowed: true, installed: [readyYouTube], linked: true });
+  await ui.click('setup-nav-discord');
+  ui.state.discordError = 'Sign-in cancelled';
+  await ui.click('connect-discord');
+  assert.match(ui.elements.get('discord-feedback').textContent, /Sign-in cancelled/);
+  await ui.focus();
+  assert.match(ui.elements.get('discord-feedback').textContent, /Sign-in cancelled/);
+  assert.equal(ui.elements.get('setup-next').textContent, 'Try your first Activity');
+  assert.match(ui.elements.get('finish-description').textContent, /sharing connection is ready/);
 });

@@ -46,17 +46,17 @@ test('exposes Activity status labels with installed metadata', async () => {
   assert.equal(installed[0].preferences.statusDisplay, 'artist');
 });
 
-test('reports unavailable Chrome userScripts.execute as a settings issue during install', async () => {
+test('reports unavailable Chromium userScripts.execute as a settings issue during install', async () => {
   const manager = new ActivityManager({ api: createApi() });
   await assert.rejects(manager.install({ metadata, source: 'ChudPresence.report({ kind: "video", media: { title: "x" } });' }),
-    /Chrome does not expose the required userScripts.execute API.*Allow User Scripts/);
+    /Chromium does not expose the required userScripts.execute API.*Allow User Scripts/);
 });
 
-test('reports missing Chrome userScripts.execute even when registration methods exist', async () => {
+test('reports missing Chromium userScripts.execute even when registration methods exist', async () => {
   const api = createApi({ userScripts: { async getScripts() { return []; }, async register() {} } });
   const manager = new ActivityManager({ api });
   await assert.rejects(manager.install({ metadata, source: 'ChudPresence.report({ kind: "video", media: { title: "x" } });' }),
-    /Chrome does not expose the required userScripts.execute API.*Chrome 135/);
+    /Chromium does not expose the required userScripts.execute API.*Chromium 135/);
 });
 
 test('restores stored Activities after a service worker cold start', async () => {

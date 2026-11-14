@@ -1,4 +1,5 @@
 import { createLinkEvents } from './events.js';
+import { configuredActivitySites } from '../core/activity-sites.js';
 
 export const LINK_STORAGE_KEY = 'chudpresenceLink';
 export const LINK_HOST_PERMISSION = 'http://127.0.0.1/*';
@@ -8,7 +9,17 @@ export async function prepareLinkNetwork(api) {
   // Link's CORS policy supplies access while retaining the browser's identity.
   if (api.permissions?.contains && api.permissions?.remove &&
       await api.permissions.contains({ origins: [LINK_HOST_PERMISSION] })) {
-    await api.permissions.remove({ origins: [LINK_HOST_PERMISSION] });
+    const stored = await api.storage?.local?.get?.('installedActivities');
+    const needed = Object.values(stored?.installedActivities || {}).some(record =>
+      configuredActivitySites(record).some(site => {
+        const url = new URL(site);
+        return url.protocol === 'http:' && url.hostname === '127.0.0.1';
+      }));
+    if (!needed) {
+      // Required grants in a development build cannot be removed. Explicit
+      // request Origin below also preserves Link identity when a grant stays.
+      try { await api.permissions.remove({ origins: [LINK_HOST_PERMISSION] }); } catch {}
+    }
   }
 }
 
@@ -74,7 +85,7 @@ export function linkInventory(activities, fields = LINK_SETTING_FIELDS) {
 
 /** Credentials and sync versions stay in the trusted background context. */
 export function createLinkClient({ storage, fetch: fetchRequest = globalThis.fetch, now = Date.now,
-  timeoutMs = 2000, schedule = setTimeout, cancel = clearTimeout, prepareNetwork = async () => {} } = {}) {
+  timeoutMs = 2000, schedule = setTimeout, cancel = clearTimeout, prepareNetwork = async () => {}, origin = '' } = {}) {
   let data = { pairing: null, baseline: {}, dirty: {}, edit: 0 };
   let loaded;
   let networkQueue = Promise.resolve();
@@ -128,7 +139,9 @@ export function createLinkClient({ storage, fetch: fetchRequest = globalThis.fet
       const response = await fetchRequest(`${endpoint}${path}`, {
         method, mode: 'cors', signal: controller.signal, credentials: 'omit', redirect: 'error', cache: 'no-store',
         referrerPolicy: 'no-referrer', keepalive,
-        headers: { Accept: stream ? 'text/event-stream' : 'application/json', ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        headers: { Accept: stream ? 'text/event-stream' : 'application/json',
+          ...(/^(?:chrome|moz)-extension:\/\/[^/]+$/.test(origin) ? { Origin: origin } : {}),
+          ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
           ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       });

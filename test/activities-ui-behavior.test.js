@@ -162,6 +162,7 @@ async function createLibrary({ installed = [], catalog = null, developerMode = f
     },
     readCatalogCache: async () => ({ catalog, fetchedAt: 0 }),
     requestHostPermissions: async () => true,
+    renderActivitySites: (await import('../extension/activity-sites-ui.js')).renderActivitySites,
     setInterval: (callback) => { polling = callback; },
   });
   vm.runInContext(source.replace(/^import[\s\S]*?from '[^']+';\r?\n/gm, ''), context);

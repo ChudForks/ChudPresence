@@ -23,6 +23,10 @@ import { ActivityV2HostClient } from './activity-v2-host-client.js';
 import { USER_SCRIPTS_UNAVAILABLE } from '../platform/browser-api.js';
 import { migratePlatformSettings, activityInstallDefaults, activityInstallCompleted } from '../platform/migration.js';
 import { restoreActivitySession, saveActivitySession } from '../platform/activity-session.js';
+import {
+  hasConfiguredSiteAccess, configuredActivitySites, normalizeActivitySites,
+  activitySitePattern, activitySiteMatches, activityMatchPatterns, activityPermissionPatterns,
+} from './activity-sites.js';
 
 const STORAGE_KEY = 'installedActivities';
 const SCRIPT_ID_PREFIX = 'chudpresence-activity-';
@@ -35,6 +39,9 @@ const STATUS_TTL_MS = 90_000;
 const MAX_PAGE_EXECUTE_SOURCE_LENGTH = 16_384;
 const MAX_PAGE_EXECUTE_ARGUMENTS_LENGTH = 16_384;
 const MAX_PAGE_EXECUTE_RESULT_LENGTH = 65_536;
+const PENDING_SITES_KEY = 'pendingActivitySites';
+const PENDING_SITE_TTL_MS = 5 * 60 * 1000;
+const MAX_PENDING_SITES = 8;
 const MAX_RETIRED_DOCUMENTS_PER_FRAME = 32;
 const MAX_NETWORK_REQUEST_BODY_BYTES = 64 * 1024;
 const MAX_NETWORK_RESPONSE_BYTES = 1024 * 1024;
@@ -90,11 +97,11 @@ function createActivityCapability() {
   return [...bytes].map((value) => value.toString(16).padStart(2, '0')).join('');
 }
 
-function isProtectedPage(rawUrl) {
+function isProtectedPage(rawUrl, allowHttp = false) {
   try {
     const url = new URL(rawUrl);
     const host = url.hostname.toLowerCase().replace(/\.$/, '');
-    return url.protocol !== 'https:' || PROTECTED_NETWORK_DOMAINS.some((domain) =>
+    return (url.protocol !== 'https:' && !(allowHttp && url.protocol === 'http:')) || PROTECTED_NETWORK_DOMAINS.some((domain) =>
       host === domain || host.endsWith(`.${domain}`),
     );
   } catch {
@@ -225,7 +232,12 @@ function scriptDefinition(record, extensionVersion = '0.0.0') {
     // Imperative execute() targets frames directly and does not apply the
     // registered script's URL filters. Check them before starting any runtime.
     `  const __matchesUrl = ${safeMatch.toString()};`,
-    `  if (!${JSON.stringify(record.metadata.matches)}.some((pattern) => __matchesUrl(pattern, location.href)) ||`,
+    `  const __configuredSites = ${JSON.stringify(configuredActivitySites(record))};`,
+    `  const __siteMatches = ${activitySiteMatches.toString()};`,
+    `  const __inScope = ${hasConfiguredSiteAccess(record.metadata)
+      ? '(url) => __configuredSites.some(site => __siteMatches(site, url))'
+      : `(url) => ${JSON.stringify(record.metadata.matches)}.some(pattern => __matchesUrl(pattern, url))`};`,
+    '  if (!__inScope(location.href) ||',
     `      ${JSON.stringify(record.metadata.excludeMatches || [])}.some((pattern) => __matchesUrl(pattern, location.href))) return;`,
     ...(record.metadata.frames === 'all' ? [] : ['  if (window !== window.top) return;']),
     '  const __activityIdentity = Object.freeze(' + JSON.stringify({
@@ -261,12 +273,16 @@ function scriptDefinition(record, extensionVersion = '0.0.0') {
     '    const url = event.destination?.url;',
     '    __documentNavigation = __navigationGraceMs > 0 && window === window.top && !event.defaultPrevented &&',
     '      event.destination?.sameDocument === false && typeof url === "string" && url.length <= 8192 &&',
-    `      ${JSON.stringify(record.metadata.matches)}.some(pattern => __matchesUrl(pattern, url)) &&`,
+    '      __inScope(url) &&',
     `      !${JSON.stringify(record.metadata.excludeMatches || [])}.some(pattern => __matchesUrl(pattern, url))`,
     '      ? { url, signal: event.signal } : null;',
     '  };',
     '  const __onDocumentNavigationError = () => { __documentNavigation = null; };',
+    // Jellyfin and other SPAs bubble untrusted pagehide/pageshow view events
+    // to Window. Native transitions are trusted and, through the legacy target
+    // override, target the Document rather than Window, so check trust only.
     '  const __onDocumentPageShow = (event) => {',
+    '    if (event?.isTrusted !== true) return;',
     '    window.removeEventListener("pageshow", __onDocumentPageShow);',
     '    if (!event.persisted || globalThis.__chudpresenceActivityGeneration !== __activityIdentity.capability) return;',
     '    delete globalThis.__chudpresenceActivityGeneration;',
@@ -291,12 +307,12 @@ function scriptDefinition(record, extensionVersion = '0.0.0') {
     // tabs.onUpdated cannot reinject into the outgoing document. A cached
     // document restarts only when pageshow confirms that it was restored.
     '    if (reason === "document-destroyed") {',
-    '      window.addEventListener("pageshow", __onDocumentPageShow, { once: true });',
+    '      window.addEventListener("pageshow", __onDocumentPageShow);',
     '    } else { try { delete globalThis.__chudpresenceActivityGeneration; } catch {} }',
     '    return true;',
     '  };',
-    '  const __onDocumentEnd = () => {',
-    '    if (__lifecycleEnded) return;',
+    '  const __onDocumentEnd = (event) => {',
+    '    if (event?.isTrusted !== true || __lifecycleEnded) return;',
     '    try { void __request("presence.clear", { closing: true,',
     '      ...(__hasDocumentNavigation() ? { navigationUrl: __documentNavigation.url } : {}),',
     '    }).catch(() => {}); } catch {}',
@@ -304,8 +320,9 @@ function scriptDefinition(record, extensionVersion = '0.0.0') {
     '  };',
     '  const __matchesActivity = (message) => message?.type === "CHUDPRESENCE_ACTIVITY_ABORT" &&',
     '    message.activityId === __activityIdentity.activityId && message.activityVersion === __activityIdentity.activityVersion;',
-    // beforeunload can be canceled. Commit teardown only when the page departs.
-    '  window.addEventListener("pagehide", __onDocumentEnd, { once: true });',
+    // Not { once: true }: an ignored SPA view event must not consume the
+    // listener before the browser's native pagehide arrives.
+    '  window.addEventListener("pagehide", __onDocumentEnd);',
     '  if (__navigationGraceMs > 0 && window === window.top) {',
     '    window.navigation?.addEventListener?.("navigate", __onDocumentNavigate);',
     '    window.navigation?.addEventListener?.("navigateerror", __onDocumentNavigationError);',
@@ -664,6 +681,7 @@ function scriptDefinition(record, extensionVersion = '0.0.0') {
     '      activityVersion: __activityIdentity.activityVersion,',
     '      apiVersion: __activityIdentity.apiVersion,',
     '      extensionVersion: __activityIdentity.extensionVersion,',
+    '      siteUrl: __configuredSites.find(site => __siteMatches(site, location.href)) || "",',
     '      frame: Object.freeze({ isTop: window === window.top }),',
     '      has(feature) { return __features[feature] === true; },',
     '    }),',
@@ -743,7 +761,7 @@ function scriptDefinition(record, extensionVersion = '0.0.0') {
     id: activityScriptId(id),
     worldId: activityWorldId(id),
     world: 'USER_SCRIPT',
-    matches: [...record.metadata.matches],
+    matches: activityMatchPatterns(record),
     ...(record.metadata.excludeMatches?.length ? { excludeMatches: [...record.metadata.excludeMatches] } : {}),
     allFrames: record.metadata.frames === 'all',
     // document_idle waits until the page is idle, which a player iframe can
@@ -774,7 +792,7 @@ function safeMatch(pattern, rawUrl) {
   } catch {
     return false;
   }
-  const match = pattern.match(/^(https):\/\/([^/]+)\/(.*)$/i);
+  const match = pattern.match(/^(https?):\/\/([^/]+)\/(.*)$/i);
   if (!match || url.protocol !== `${match[1].toLowerCase()}:`) return false;
   const hostPattern = match[2].toLowerCase();
   const hostname = url.hostname.toLowerCase();
@@ -785,6 +803,12 @@ function safeMatch(pattern, rawUrl) {
   const pathPattern = `/${match[3]}`;
   const escaped = pathPattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replaceAll('*', '.*');
   return new RegExp(`^${escaped}$`).test(`${url.pathname}${url.search}`);
+}
+
+function matchesActivityUrl(record, url) {
+  return hasConfiguredSiteAccess(record?.metadata)
+    ? configuredActivitySites(record).some(site => activitySiteMatches(site, url))
+    : Array.isArray(record?.metadata?.matches) && record.metadata.matches.some(pattern => safeMatch(pattern, url));
 }
 
 export class ActivityManager {
@@ -893,7 +917,10 @@ export class ActivityManager {
         version: record.metadata.version,
         apiVersion: record.metadata.apiVersion,
         compatibilityStatus,
-        matches: Array.isArray(record.metadata.matches) ? [...record.metadata.matches] : [],
+        matches: activityMatchPatterns(record),
+        ...(hasConfiguredSiteAccess(record.metadata) ? {
+          siteAccess: record.metadata.siteAccess, sites: configuredActivitySites(record),
+        } : {}),
         network: Array.isArray(record.metadata.network) ? [...record.metadata.network] : [],
         ...(record.metadata.apiVersion === 2 ? { pageAccess: structuredClone(record.metadata.pageAccess || {}) } : {}),
         settings: Array.isArray(record.metadata.settings) ? structuredClone(record.metadata.settings) : [],
@@ -1136,7 +1163,7 @@ export class ActivityManager {
         Number(apiVersion) !== record.metadata.apiVersion || activityVersion !== record.metadata.version || capability !== record.capability ||
         typeof sender?.tab?.id !== 'number' || !Number.isInteger(sender.frameId) ||
         typeof sender.documentId !== 'string' || !sender.documentId ||
-        !record.metadata.matches.some((pattern) => safeMatch(pattern, sender.url || '')) ||
+        !matchesActivityUrl(record, sender.url || '') ||
         (record.metadata.excludeMatches || []).some((pattern) => safeMatch(pattern, sender.url || ''))) return false;
 
     if (!this.activityPorts.has(id)) this.activityPorts.set(id, new Map());
@@ -1193,10 +1220,14 @@ export class ActivityManager {
     if (!await hasUserScriptsPermission(this.api)) {
       throw new Error(USER_SCRIPTS_UNAVAILABLE);
     }
-    if (!await hasHostPermissions([...record.metadata.matches, ...(record.metadata.network || [])], this.api)) {
+    if (!await hasHostPermissions(activityPermissionPatterns(record), this.api)) {
       throw new Error('Grant every website and network permission requested by this Activity first.');
     }
 
+    if (!activityMatchPatterns(record).length) {
+      await this.unregister(record.metadata.id);
+      return;
+    }
     const definition = scriptDefinition(record, extensionVersion(this.api));
     await this.api.userScripts.configureWorld(activityWorldConfiguration(definition, record.metadata.apiVersion));
     const registered = await this.installedScripts();
@@ -1274,6 +1305,7 @@ export class ActivityManager {
       source,
       preferences: normalizeActivityPreferences(previous?.preferences || defaults.preferences),
       settingValues: normalizeActivitySettings(metadata.settings || [], previous?.settingValues),
+      ...(hasConfiguredSiteAccess(metadata) ? { sites: configuredActivitySites(previous || { metadata }) } : {}),
       ...(previous && (previous.pendingUpgrade || previous.metadata.version !== metadata.version)
         ? (() => {
             const fromVersion = previous.pendingUpgrade?.fromVersion || previous.metadata.version;
@@ -1317,8 +1349,7 @@ export class ActivityManager {
         });
       }
       await this.removeUnusedHostPermissions([
-        ...(Array.isArray(previous.metadata?.matches) ? previous.metadata.matches : []),
-        ...(Array.isArray(previous.metadata?.network) ? previous.metadata.network : []),
+        ...activityPermissionPatterns(previous),
       ], records);
     } else {
       await this.injectMatchingTabs(record);
@@ -1340,13 +1371,13 @@ export class ActivityManager {
 
   async matchingOpenTabs(record) {
     if (typeof this.api.tabs?.query !== 'function') return [];
-    const patterns = Array.isArray(record?.metadata?.matches) ? record.metadata.matches : [];
+    const patterns = activityMatchPatterns(record);
     if (!patterns.length) return [];
     try {
       const tabs = await this.api.tabs.query({ url: patterns });
       return (Array.isArray(tabs) ? tabs : []).filter((tab) =>
         Number.isInteger(tab?.id) && tab.discarded !== true &&
-        patterns.some((pattern) => safeMatch(pattern, tab.url || '')) &&
+        matchesActivityUrl(record, tab.url || '') &&
         !(record.metadata.excludeMatches || []).some((pattern) => safeMatch(pattern, tab.url || '')),
       );
     } catch {
@@ -1393,8 +1424,7 @@ export class ActivityManager {
     const records = await this.load();
     let injected = 0;
     for (const record of Object.values(records)) {
-      const patterns = Array.isArray(record?.metadata?.matches) ? record.metadata.matches : [];
-      if (!record?.enabled || !patterns.some((pattern) => safeMatch(pattern, rawUrl))) continue;
+      if (!record?.enabled || !matchesActivityUrl(record, rawUrl)) continue;
       if ((record.metadata.excludeMatches || []).some((pattern) => safeMatch(pattern, rawUrl))) continue;
       if (await this.injectActivityTab(record, { id: tabId })) injected += 1;
     }
@@ -1481,8 +1511,7 @@ export class ActivityManager {
     this.activityDiagnostics.delete(id);
     this.activityLogs = this.activityLogs.filter((entry) => entry.activityId !== id);
     const removedPatterns = [
-      ...(Array.isArray(previous.metadata?.matches) ? previous.metadata.matches : []),
-      ...(Array.isArray(previous.metadata?.network) ? previous.metadata.network : []),
+      ...activityPermissionPatterns(previous),
     ];
     await this.removeUnusedHostPermissions(removedPatterns, records);
     return true;
@@ -1497,8 +1526,7 @@ export class ActivityManager {
     const stillUsed = new Set(Object.values(remainingRecords)
       .filter((record) => record?.metadata && Array.isArray(record.metadata.matches))
       .flatMap((record) => [
-        ...record.metadata.matches,
-        ...(Array.isArray(record.metadata.network) ? record.metadata.network : []),
+        ...activityPermissionPatterns(record),
       ].map(permissionOrigin)));
     const unused = [...new Set(removedMatches.map(permissionOrigin))]
       .filter((origin) => origin && !stillUsed.has(origin));
@@ -1512,6 +1540,127 @@ export class ActivityManager {
 
   setEnabled(id, enabled) {
     return this.serialize(() => this.setEnabledInternal(id, enabled));
+  }
+
+  addSite(id, site) {
+    return this.serialize(() => this.changeSiteInternal(id, site, false));
+  }
+
+  removeSite(id, site) {
+    return this.serialize(() => this.changeSiteInternal(id, site, true));
+  }
+
+  // Chromium and Firefox can close the popup while a host-permission prompt is
+  // open, ending the popup's add request. The popup records the server it is
+  // about to request so the grant itself can complete setup. Entries add only
+  // after the browser reports that exact server permission, and expire quickly.
+  pendingSiteOperation(operation) {
+    const run = (this.pendingSiteChain || Promise.resolve()).then(operation);
+    this.pendingSiteChain = run.catch(() => {});
+    return run;
+  }
+
+  async readPendingSites() {
+    const session = this.api.storage?.session;
+    let entries = this.pendingSites || [];
+    if (session?.get) {
+      try { entries = (await session.get(PENDING_SITES_KEY))?.[PENDING_SITES_KEY] || []; } catch {}
+    }
+    const now = Date.now();
+    return Array.isArray(entries) ? entries.filter(entry => entry && typeof entry.id === 'string' &&
+      typeof entry.site === 'string' && Number.isFinite(entry.expires) && entry.expires > now) : [];
+  }
+
+  async writePendingSites(entries) {
+    this.pendingSites = entries;
+    const session = this.api.storage?.session;
+    if (!session?.set) return;
+    try {
+      if (entries.length) await session.set({ [PENDING_SITES_KEY]: entries });
+      else await session.remove?.(PENDING_SITES_KEY);
+    } catch {}
+  }
+
+  setPendingSite(id, site, pending = true) {
+    return this.pendingSiteOperation(async () => {
+      const records = await this.load();
+      if (!records[id] || !hasConfiguredSiteAccess(records[id].metadata)) {
+        throw new Error('This installed Activity does not support user-configured servers.');
+      }
+      const [normalized] = normalizeActivitySites([site]);
+      const entries = (await this.readPendingSites()).filter(entry => entry.id !== id || entry.site !== normalized);
+      if (pending) entries.push({ id, site: normalized, expires: Date.now() + PENDING_SITE_TTL_MS });
+      await this.writePendingSites(entries.slice(-MAX_PENDING_SITES));
+      return { id, site: normalized, pending };
+    });
+  }
+
+  completePendingSites() {
+    return this.pendingSiteOperation(async () => {
+      const entries = await this.readPendingSites();
+      const remaining = [];
+      const added = [];
+      for (const entry of entries) {
+        const record = (await this.load())[entry.id];
+        // Already-configured servers are restored by restoreAll() on the same grant.
+        if (!record || !hasConfiguredSiteAccess(record.metadata) || configuredActivitySites(record).includes(entry.site)) continue;
+        if (!await hasHostPermissions([activitySitePattern(entry.site)], this.api)) {
+          remaining.push(entry);
+          continue;
+        }
+        try {
+          await this.addSite(entry.id, entry.site);
+          added.push({ id: entry.id, site: entry.site });
+        } catch { remaining.push(entry); }
+      }
+      await this.writePendingSites(remaining);
+      return added;
+    });
+  }
+
+  async changeSiteInternal(id, site, remove) {
+    const records = await this.load();
+    const previous = records[id];
+    if (!previous || !hasConfiguredSiteAccess(previous.metadata)) {
+      throw new Error('This installed Activity does not support user-configured servers.');
+    }
+    const [normalized] = normalizeActivitySites([site]);
+    const current = configuredActivitySites(previous);
+    const sites = normalizeActivitySites(remove ? current.filter(value => value !== normalized) : [...current.filter(value => value !== normalized), normalized]);
+    const record = { ...previous, sites, capability: createActivityCapability(), updatedAt: Date.now() };
+    if (!remove && !await hasHostPermissions(activityPermissionPatterns(record), this.api)) {
+      throw new Error('Grant this server’s website permission before adding it.');
+    }
+    if (JSON.stringify(sites) === JSON.stringify(current)) {
+      if (!remove && previous.enabled) {
+        await this.register(previous);
+        previous.permissionMissing = false;
+        delete previous.error;
+        await this.save();
+        await this.injectMatchingTabs(previous);
+      }
+      return { id, sites: current };
+    }
+    record.permissionMissing = false;
+    delete record.error;
+    await this.notifyActivityTeardown(id, 'sites-changed');
+    await this.unregister(id);
+    this.lastSeen.delete(id);
+    await this.onClear(id);
+    records[id] = record;
+    try {
+      if (record.enabled) await this.register(record);
+      await this.save();
+    } catch (error) {
+      records[id] = previous;
+      await this.unregister(id).catch(() => {});
+      await this.save().catch(() => {});
+      if (previous.enabled) await this.register(previous).then(() => this.injectMatchingTabs(previous)).catch(() => {});
+      throw error;
+    }
+    if (record.enabled) await this.injectMatchingTabs(record);
+    await this.removeUnusedHostPermissions(activityPermissionPatterns(previous), records);
+    return { id, sites };
   }
 
   setPreferences(id, patch) {
@@ -1646,7 +1795,7 @@ export class ActivityManager {
         await this.onClear(record.metadata.id);
         continue;
       }
-      if (!await hasHostPermissions([...record.metadata.matches, ...(record.metadata.network || [])], this.api)) {
+      if (!await hasHostPermissions(activityPermissionPatterns(record), this.api)) {
         record.permissionMissing = true;
         await this.notifyActivityTeardown(record.metadata.id, 'permission-lost');
         await this.unregister(record.metadata.id).catch(() => {});
@@ -1655,6 +1804,13 @@ export class ActivityManager {
         continue;
       }
       record.permissionMissing = false;
+      if (!activityMatchPatterns(record).length) {
+        await this.unregister(record.metadata.id).catch(() => {});
+        this.lastSeen.delete(record.metadata.id);
+        await this.onClear(record.metadata.id);
+        delete record.error;
+        continue;
+      }
       try {
         const exists = registered.some((script) => script.id === activityScriptId(record.metadata.id));
         const definition = scriptDefinition(record, extensionVersion(this.api));
@@ -1734,18 +1890,21 @@ export class ActivityManager {
         error.code = 'invalid_url';
         throw error;
       }
-      if (url.protocol !== 'https:' || !url.hostname || url.username || url.password || url.hash) {
+      const networkSite = configuredActivitySites(record).find(site =>
+        activitySiteMatches(site, sender.url || '') && activitySiteMatches(site, url.href));
+      if ((url.protocol !== 'https:' && !(url.protocol === 'http:' && networkSite)) || !url.hostname || url.username || url.password || url.hash) {
         const error = new TypeError('Network URLs must be HTTPS and cannot contain credentials or fragments.');
         error.code = 'invalid_url';
         throw error;
       }
-      if (isProtectedPage(url.href)) {
+      if (isProtectedPage(url.href, Boolean(networkSite))) {
         const error = new TypeError('Discord network endpoints are reserved for extension core.');
         error.code = 'protected_endpoint';
         throw error;
       }
       const networkPatterns = Array.isArray(record.metadata.network) ? record.metadata.network : [];
-      const matchedPattern = networkPatterns.find((pattern) => safeMatch(pattern, url.href));
+      const matchedPattern = networkSite ? activitySitePattern(networkSite)
+        : networkPatterns.find((pattern) => safeMatch(pattern, url.href));
       if (!matchedPattern) {
         const error = new TypeError('This network origin is not declared in the Activity metadata.');
         error.code = 'origin_not_declared';
@@ -2081,7 +2240,7 @@ export class ActivityManager {
       } };
     }
     const scopedV2Clear = structured && record.metadata.apiVersion === 2 && message.operation === 'presence.clear';
-    if (!scopedV2Clear && !record.metadata.matches.some((pattern) => safeMatch(pattern, sender.url || ''))) return false;
+    if (!scopedV2Clear && !matchesActivityUrl(record, sender.url || '')) return false;
     if (!scopedV2Clear && (record.metadata.excludeMatches || []).some((pattern) => safeMatch(pattern, sender.url || ''))) return false;
 
     const requestId = structured ? message.requestId : '';
@@ -2152,7 +2311,7 @@ export class ActivityManager {
     }
 
     if (operation === 'page.execute') {
-      if (isProtectedPage(sender.url || '')) {
+      if (isProtectedPage(sender.url || '', hasConfiguredSiteAccess(record.metadata))) {
         return respond(false, null, 'protected_page', 'Page execution is unavailable on protected pages.');
       }
       if (typeof sender.documentId !== 'string' || !sender.documentId || !Number.isInteger(sender.frameId)) {
@@ -2306,7 +2465,7 @@ export class ActivityManager {
         const navigationUrl = message.payload?.navigationUrl;
         const navigationGraceMs = frameId === 0 &&
           typeof navigationUrl === 'string' && navigationUrl.length <= 8192 &&
-          record.metadata.matches.some(pattern => safeMatch(pattern, navigationUrl)) &&
+          matchesActivityUrl(record, navigationUrl) &&
           !(record.metadata.excludeMatches || []).some(pattern => safeMatch(pattern, navigationUrl))
           ? record.metadata.presence?.navigationGraceMs || 0 : 0;
         await this.onClear(id, tabId, messageDocumentId, frameId, {

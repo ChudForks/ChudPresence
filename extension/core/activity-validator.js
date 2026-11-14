@@ -1,5 +1,6 @@
 import { validateActivitySettingDefinitions } from './activity-settings.js';
 import { validateActivityV2PageAccess } from './activity-v2-page.js';
+import { hasConfiguredSiteAccess } from './activity-sites.js';
 import {
   ACTIVITY_API_VERSION,
   ACTIVITY_ID_PATTERN,
@@ -177,6 +178,10 @@ export function validateActivityMetadata(metadata) {
   }
   if (metadata.minExtensionVersion !== undefined && !isSemanticVersion(metadata.minExtensionVersion)) {
     fail('Activity minExtensionVersion must use semantic version format.');
+  }
+  if (metadata.siteAccess !== undefined && (!hasConfiguredSiteAccess(metadata) ||
+      (metadata.frames !== undefined && metadata.frames !== 'top'))) {
+    fail('User-configured sites require a V1 top-frame Activity.');
   }
   if (!Array.isArray(metadata.matches) || metadata.matches.length < 1 || metadata.matches.length > 32) {
     fail('Activity matches must contain between 1 and 32 HTTPS site patterns.');

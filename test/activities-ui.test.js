@@ -30,7 +30,9 @@ test('Activity Library provides a selectable list and responsive details inspect
 
 test('Activity Library explains Chromium user script availability and requests only declared origins', async () => {
   const [html, script] = await Promise.all([readExtensionFile('activities.html'), readExtensionFile('activities.js')]);
-  assert.match(html, /Chrome 138[\s\S]*Allow User Scripts/);
+  assert.match(html, /data-browser-name/);
+  assert.match(html, /data-extensions-page/);
+  assert.match(html, /Allow User Scripts[\s\S]*older browser version[\s\S]*Developer mode/);
   assert.match(script, /api\.permissions\.request\(\{ origins \}\)/);
   assert.match(script, /api\.userScripts\?\.execute/);
   assert.doesNotMatch(script, /requestUserScriptsPermission|Firefox requires|Firefox permission/);

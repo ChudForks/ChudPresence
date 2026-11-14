@@ -1,6 +1,6 @@
 {
   "name": "chudpresence",
-  "version": "2.1.2",
+  "version": "2.1.3",
   "private": true,
   "type": "module",
   "description": "Share your browsing and playback activity on Discord with customizable Activities.",
@@ -11,6 +11,7 @@
     "test:v2-browser": "node scripts/test-v2-browser.mjs",
     "test:foreground-browser": "node scripts/test-foreground-browser.mjs",
     "test:activities-browser": "node scripts/test-activities-browser.mjs",
+    "test:jellyfin-browser": "node scripts/test-jellyfin-browser.mjs",
     "test:link-browser": "node scripts/test-link-browser.mjs",
     "build": "node scripts/build.mjs",
     "build:chromium": "node scripts/build.mjs chromium",

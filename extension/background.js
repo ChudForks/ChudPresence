@@ -377,6 +377,17 @@ async function handleActivityLibraryMessage(message) {
   if (message.type === 'ACTIVITY_SET_SETTING') {
     return activityManager.setActivitySetting(message.id, message.settingId, message.value);
   }
+  if (message.type === 'ACTIVITY_PENDING_SITE') {
+    return activityManager.setPendingSite(message.id, message.site, message.cancel !== true);
+  }
+  if (message.type === 'ACTIVITY_ADD_SITE' || message.type === 'ACTIVITY_REMOVE_SITE') {
+    if (message.type === 'ACTIVITY_ADD_SITE') await activityManager.setPendingSite(message.id, message.site, false).catch(() => {});
+    const result = message.type === 'ACTIVITY_ADD_SITE'
+      ? await activityManager.addSite(message.id, message.site)
+      : await activityManager.removeSite(message.id, message.site);
+    publishCurrentActivity();
+    return result;
+  }
   if (message.type === 'ACTIVITY_CLEAR_DIAGNOSTICS') {
     if (Object.hasOwn(message, 'id') && message.id !== null && typeof message.id !== 'string') {
       throw new TypeError('A valid Activity ID is required to clear its diagnostics.');
@@ -476,6 +487,9 @@ function handleRuntimeMessage(message, sender, sendResponse) {
     'ACTIVITY_SET_ENABLED',
     'ACTIVITY_SET_PREFERENCES',
     'ACTIVITY_SET_SETTING',
+    'ACTIVITY_PENDING_SITE',
+    'ACTIVITY_ADD_SITE',
+    'ACTIVITY_REMOVE_SITE',
     'ACTIVITY_CLEAR_DIAGNOSTICS',
     'ACTIVITY_RESTORE',
   ].includes(message?.type);
@@ -666,6 +680,9 @@ chrome.permissions?.onAdded?.addListener(() => {
   registerUserScriptMessageListener();
   registerUserScriptConnectListener();
   activityManager.restoreAll().then(ensureDefaultYouTube).catch(() => {});
+  // Finish a server the popup started enabling if the permission prompt closed it.
+  ensureActivityReady().then(() => activityManager.completePendingSites())
+    .then(added => { if (added.length) void publishCurrentActivity(); }).catch(() => {});
 });
 
 chrome.alarms.create(ACTIVITY_PRUNE_ALARM, { delayInMinutes: 0.5, periodInMinutes: 0.5 });

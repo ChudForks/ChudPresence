@@ -1,7 +1,7 @@
 /**
  * Check whether the extension can access the site origins required by an Activity.
- * `origins` must be the Activity's declared match patterns, not URLs inferred
- * from a page at runtime.
+ * `origins` must be declared patterns or server patterns explicitly approved
+ * by the user through the extension UI.
  */
 export async function hasHostPermissions(origins, api = globalThis.chrome) {
   if (!Array.isArray(origins) || origins.length === 0) return true;

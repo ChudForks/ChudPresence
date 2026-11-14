@@ -6,7 +6,8 @@ const storage = {
   get: keys => chrome.storage.local.get(keys),
   set: values => chrome.storage.local.set(values),
 };
-const client = createLinkClient({ storage, prepareNetwork: () => prepareLinkNetwork(chrome) });
+const client = createLinkClient({ storage, prepareNetwork: () => prepareLinkNetwork(chrome),
+  origin: chrome.runtime.getURL('').replace(/\/$/, '') });
 const publisher = createLinkPublisher({ headless: discordPresence, client, storage });
 let configured = false;
 

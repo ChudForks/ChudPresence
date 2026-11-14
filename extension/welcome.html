@@ -4,60 +4,106 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="dark" />
-    <title>Welcome to ChudPresence</title>
+    <title>Set up ChudPresence</title>
+    <link rel="icon" href="icons/icon32.png" />
     <link rel="stylesheet" href="activities.css" />
     <link rel="stylesheet" href="welcome.css" />
   </head>
   <body>
-    <header class="app-header">
-      <a class="brand" href="popup.html"><img src="icons/icon48.png" alt="" /><strong>ChudPresence</strong></a>
+    <header class="app-header setup-header">
+      <a class="brand" href="popup.html"><img src="icons/icon48.png" alt="" /><strong>ChudPresence</strong><span class="header-label">SETUP</span></a>
       <a class="documentation-link" href="activities.html">Activity Library <span aria-hidden="true">↗</span></a>
     </header>
     <main class="setup-shell">
       <header class="setup-intro">
-        <span class="setup-eyebrow">GET STARTED</span>
-        <h1>Your browser activity,<br />on your Discord profile.</h1>
-        <p>First, let’s get your first Activity running. You choose which websites to add and when to connect Discord.</p>
+        <span class="setup-eyebrow">A LITTLE SETUP. A LOT MORE PRESENCE.</span>
+        <h1>Make your <span>presence</span> known.</h1>
+        <p>Bring what you’re watching and listening to along for the ride.</p>
       </header>
-      <p class="setup-feedback" id="setup-feedback" role="status" aria-live="polite">Checking your setup…</p>
-      <ol class="setup-steps" aria-label="Setup steps">
-        <li class="setup-step" id="permission-step">
-          <span class="step-number" aria-hidden="true">1</span>
-          <div class="step-content">
-            <div class="step-heading"><h2>Enable Activities</h2><span class="step-state" id="permission-state">Required</span></div>
-            <p>An <strong>Activity</strong> teaches ChudPresence how to detect what you’re watching or listening to on a website.</p>
-            <p>Click below to open ChudPresence’s page in <strong>chrome://extensions</strong>, then turn on <strong>Allow User Scripts</strong>. On Chrome 135–137, turn on <strong>Developer mode</strong> instead. Come back to this tab when you’re done.</p>
-            <p class="step-hint">Your Services list is empty until this is enabled. The included YouTube Activity will be added automatically.</p>
-            <button class="button primary" id="enable-activities" type="button" disabled>Checking permission…</button>
+      <div class="setup-wizard" id="setup-wizard" data-step="welcome">
+        <nav class="setup-navigation" aria-label="Setup steps">
+          <ol>
+            <li><button id="setup-nav-welcome" class="setup-nav is-active" type="button" aria-current="step"><span class="nav-number" aria-hidden="true">01</span><span>Welcome</span></button></li>
+            <li><button id="setup-nav-permission" class="setup-nav" type="button"><span class="nav-number" aria-hidden="true">02</span><span>Enable Activities</span></button></li>
+            <li><button id="setup-nav-discord" class="setup-nav" type="button"><span class="nav-number" aria-hidden="true">03</span><span>Connect Discord</span></button></li>
+            <li><button id="setup-nav-activity" class="setup-nav" type="button"><span class="nav-number" aria-hidden="true">04</span><span>Try it out</span></button></li>
+          </ol>
+          <div class="setup-progress" id="setup-progress" role="progressbar" aria-label="Setup progress" aria-valuemin="1" aria-valuemax="4" aria-valuenow="1"><span></span></div>
+        </nav>
+        <div class="setup-layout">
+          <div class="setup-content">
+            <section class="setup-panel" id="intro-step" aria-labelledby="intro-title">
+              <span class="setup-eyebrow">WELCOME TO CHUDPRESENCE</span>
+              <h2 id="intro-title" tabindex="-1">Show off what you’re<br />doing in Discord.</h2>
+              <p class="panel-lead">Install more Activities, and if one you want isn’t there, request it or create it yourself! <a href="https://github.com/ChudForks/ChudPresence-Activities-V2" target="_blank" rel="noopener noreferrer">Activity V2 on GitHub <span aria-hidden="true">↗</span></a></p>
+              <ul class="welcome-features">
+                <li><span class="feature-icon feature-play" aria-hidden="true"></span><div><strong>Start with something familiar</strong><span>YouTube is included and ready to set up.</span></div></li>
+                <li><span class="feature-icon feature-sliders" aria-hidden="true"></span><div><strong>Your sites. Your choice.</strong><span>Add Activities and review their website access.</span></div></li>
+                <li><span class="feature-icon feature-shield" aria-hidden="true"></span><div><strong>Try it at your own pace</strong><span>Preview locally before connecting Discord.</span></div></li>
+              </ul>
+            </section>
+            <section class="setup-panel setup-step" id="permission-step" aria-labelledby="permission-title" hidden>
+              <span class="step-number" aria-hidden="true">1</span>
+              <div class="step-content">
+                <div class="step-heading"><h2 id="permission-title" tabindex="-1">Enable your Activities.</h2><span class="step-state" id="permission-state">Required</span></div>
+                <p class="panel-lead">An <strong>Activity</strong> detects what you’re watching or listening to on a website. One browser setting gets them running.</p>
+                <div class="instruction-card">
+                  <span class="instruction-label">IN <span data-extensions-page>THE EXTENSIONS PAGE</span></span>
+                  <ol class="permission-instructions">
+                    <li>Open ChudPresence’s extension settings.</li>
+                    <li>Turn on <strong>Allow User Scripts</strong>.</li>
+                    <li>Return here. We’ll check the setting for you.</li>
+                  </ol>
+                  <div class="setting-example" aria-label="Illustration: Allow User Scripts switched on"><span>Allow User Scripts</span><span class="example-toggle" aria-hidden="true"></span></div>
+                </div>
+                <button class="button primary panel-action" id="enable-activities" type="button" disabled>Checking permission…</button>
+                <p class="step-hint">Missing the setting in an older browser? Turn on <strong>Developer mode</strong> on the Extensions page instead. The included YouTube Activity is added once Activities are enabled.</p>
+              </div>
+            </section>
+            <section class="setup-panel setup-step" id="discord-step" aria-labelledby="discord-title" hidden>
+              <span class="step-number" aria-hidden="true">2</span>
+              <div class="step-content">
+                <div class="step-heading"><h2 id="discord-title" tabindex="-1">Connect your Discord.</h2><span class="step-state" id="discord-state">Needed to share</span></div>
+                <p class="panel-lead">Connect Discord to share your detected activity with friends. Your next video or favorite track can become part of your profile.</p>
+                <div class="connection-card"><img src="icons/icon48.png" alt="ChudPresence" /><span class="connection-line" aria-hidden="true"></span><img src="assets/services/discord.png" alt="Discord" /></div>
+                <button class="button primary panel-action" id="connect-discord" type="button" disabled>Checking connection…</button>
+                <p class="step-hint" id="discord-feedback" role="status" aria-live="polite"></p>
+                <p class="step-hint">Want to look around first? Choose <strong>Use local preview</strong>. To share on Discord, you’ll need to sign in or pair the ChudPresence Link desktop app.</p>
+                <details class="link-option"><summary>Using ChudPresence Link instead?</summary><p class="step-hint link-app-hint" id="link-app-hint"><a href="https://github.com/ChudForks/ChudPresence-Link/releases/tag/v0.4.1-build.cf1de1439101cbbece94a02d5aac484c24cd8d2e" target="_blank" rel="noopener noreferrer">Download ChudPresence Link from GitHub</a>, or search for <strong>ChudPresence Link</strong> in the Microsoft Store. Pair it from the <strong>Link</strong> tab in the ChudPresence popup. Link can share activity without this Discord sign-in.</p></details>
+              </div>
+            </section>
+            <section class="setup-panel setup-step" id="activity-step" aria-labelledby="activity-title" hidden>
+              <span class="step-number" aria-hidden="true">3</span>
+              <div class="step-content">
+                <div class="step-heading"><h2 id="activity-title" tabindex="-1">Try your first Activity.</h2><span class="step-state" id="activity-state">Next</span></div>
+                <p class="panel-lead" id="activity-description">YouTube is included, so you can try it without downloading anything else. Enable Activities to get it ready.</p>
+                <div class="first-activity"><img src="default-activities/youtube/icon.png" alt="" /><div><strong>YouTube</strong><span>Your first Activity · Included</span></div><button class="button secondary" id="try-youtube" type="button" disabled>Open YouTube <span aria-hidden="true">↗</span></button></div>
+                <ol class="try-instructions"><li>Play a YouTube video.</li><li>Open ChudPresence from <span data-browser-name>your browser</span>’s Extensions menu (the puzzle piece).</li><li>Check your <strong>Local presence preview</strong>. If it stays blank, reload the video’s tab.</li></ol>
+                <div class="finish-note"><strong id="finish-title">Ready when you are.</strong><p id="finish-description">Enable Activities to finish. You can connect Discord later.</p></div>
+                <a class="more-activities" href="activities.html">Find your next favorite in the Activity Library <span aria-hidden="true">↗</span></a>
+                <p class="step-hint">Choose <strong>Refresh catalog</strong> in the Library, approve catalog access, then review website access for each Activity you install.</p>
+              </div>
+            </section>
+            <div class="setup-feedback-wrap"><p class="setup-feedback" id="setup-feedback" role="status" aria-live="polite">Checking your setup…</p></div>
+            <footer class="setup-controls">
+              <button class="back-button" id="setup-back" type="button" hidden><span aria-hidden="true">←</span> Back</button>
+              <span class="setup-position" id="setup-position">Step 1 of 4</span>
+              <button class="button primary next-button" id="setup-next" type="button">Let’s get started <span aria-hidden="true">→</span></button>
+              <button class="button primary next-button" id="finish-setup" type="button" disabled hidden>Finish setup <span aria-hidden="true">→</span></button>
+            </footer>
           </div>
-        </li>
-        <li class="setup-step" id="discord-step">
-          <span class="step-number" aria-hidden="true">2</span>
-          <div class="step-content">
-            <div class="step-heading"><h2>Connect Discord</h2><span class="step-state" id="discord-state">Needed to share</span></div>
-            <p>Sign in to Discord to share detected activity on your profile. This is optional only if you use the <strong>ChudPresence Link</strong> desktop app, which shares your activity for you. You can try the local preview first and connect later from the ChudPresence popup.</p>
-            <button class="button secondary" id="connect-discord" type="button" disabled>Checking connection…</button>
-            <p class="step-hint link-app-hint" id="link-app-hint">Don’t have ChudPresence Link? <a href="https://github.com/ChudForks/ChudPresence-Link/releases/tag/v0.4.1-build.cf1de1439101cbbece94a02d5aac484c24cd8d2e" target="_blank" rel="noopener noreferrer">Download it from GitHub</a>, or search for <strong>ChudPresence Link</strong> in the Microsoft Store. Then pair it from the Link tab in the ChudPresence popup.</p>
-            <p class="step-hint" id="discord-feedback" role="status" aria-live="polite"></p>
-          </div>
-        </li>
-        <li class="setup-step" id="activity-step">
-          <span class="step-number" aria-hidden="true">3</span>
-          <div class="step-content">
-            <div class="step-heading"><h2>Try your first Activity</h2><span class="step-state" id="activity-state">Next</span></div>
-            <p id="activity-description">YouTube is included, so you can try it without downloading anything else. Enable Activities above to get it ready.</p>
-            <p>Play a YouTube video, then click ChudPresence in Chrome’s Extensions menu (the puzzle piece) to see your <strong>Local presence preview</strong>. Existing tabs are detected automatically; reload the video’s tab if it stays blank.</p>
-            <div class="step-actions"><button class="button secondary" id="try-youtube" type="button" disabled>Open YouTube</button><a href="activities.html">Browse more Activities</a></div>
-            <p class="step-hint">In the Library, choose <strong>Refresh catalog</strong> and approve catalog access. Install an Activity for each site you use, reviewing its requested website access.</p>
-          </div>
-        </li>
-      </ol>
-      <footer class="setup-footer">
-        <div><strong id="finish-title">Ready when you are.</strong><p id="finish-description">Enable Activities to finish. Discord can wait.</p></div>
-        <div class="step-actions"><button class="button primary" id="finish-setup" type="button" disabled>Finish setup</button><a href="activities.html">Set up later</a></div>
-        <p class="step-hint">You can reopen this guide from the popup’s Settings or the Activity Library.</p>
-      </footer>
-      <noscript>This guide needs JavaScript to check your extension setup. Reload this page to try again.</noscript>
+          <aside class="presence-scene" aria-labelledby="presence-example-title">
+            <div class="scene-heading" id="presence-example-title"><span class="scene-star" aria-hidden="true">✦</span> YOUR ACTIVITY, ON DISCORD</div>
+            <figure class="discord-showcase">
+              <div class="discord-member-capture"><img src="assets/setup/discord-member.png" width="248" height="42" alt="Mini profile for Fat Chud showing Vsauce as the current activity in Discord’s member list." /></div>
+              <div class="discord-profile-capture"><img src="assets/setup/discord-profile.png" width="304" height="629" alt="Fat Chud’s Discord profile, watching Do Chairs Exist? by Vsauce, with playback progress and Watch on YouTube and View channel buttons." /></div>
+              <figcaption class="preview-disclaimer">On your profile and in the member list.<span>Example activity · Do Chairs Exist? by Vsauce</span></figcaption>
+            </figure>
+          </aside>
+        </div>
+      </div>
+      <footer class="page-footer"><span>You’re in control of what you share.</span><a href="activities.html">Set up later <span aria-hidden="true">↗</span></a><p>Reopen this guide from Settings or the Activity Library.</p></footer>
+      <noscript>This guide needs JavaScript to check your extension setup. Enable JavaScript and reload this page to try again.</noscript>
     </main>
     <script type="module" src="welcome.js"></script>
   </body>
